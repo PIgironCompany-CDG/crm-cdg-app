@@ -436,6 +436,7 @@ function kpi(v,l,sub){return `<div class="kpi"><div class="v">${v}</div><div cla
 function destroyCharts(){Object.values(charts).forEach(c=>{try{c.destroy();}catch(e){}});charts={};}
 function mkChart(id,type,labels,data,onClick,horizontal){
   const el=document.getElementById(id); if(!el) return;
+  if(typeof Chart==='undefined') return;   // grafico opzionale: se la libreria non c'è, il resto si mostra comunque
   charts[id]=new Chart(el,{type,data:{labels,datasets:[{data,backgroundColor:'#26578a'}]},
     options:{indexAxis:horizontal?'y':'x',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
       onClick:(e,els)=>{if(onClick&&els&&els.length){const i=els[0].index; onClick(labels[i],i);}}}});
@@ -514,8 +515,7 @@ function renderVendite(){
 function renderDash(){
   if(!DATA.length) return;
   const vend=!document.getElementById('d-vendite').classList.contains('hidden');
-  if(vend){ if(typeof Chart!=='undefined') renderVendite(); }
-  else renderMercato();
+  if(vend) renderVendite(); else renderMercato();
 }
 // pipeline come filtro nella sezione Clienti
 const BUCKETS=[
