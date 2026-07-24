@@ -65,6 +65,13 @@
   .kv{display:grid;grid-template-columns:140px 1fr;gap:6px 12px;font-size:14px}
   .kv .k{color:var(--mid)}
   #dash{padding:40px 16px;text-align:center;color:var(--mid)}
+  .fl{display:block;font-size:12px;color:var(--mid);margin:10px 0 4px}
+  .fi{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:15px;font-family:inherit}
+  textarea.fi{resize:vertical}
+  .savebar{position:sticky;bottom:0;background:#fff;border-top:1px solid var(--line);padding:12px 18px;display:flex;gap:12px;align-items:center}
+  .savebar button{background:var(--dark);color:#fff;border:0;border-radius:8px;padding:11px 20px;font-weight:600;font-size:15px}
+  .savebar button:disabled{opacity:.5}
+  #saveMsg{font-size:13px;color:var(--mid)}
 
   @media (max-width:560px){
     .kv{grid-template-columns:120px 1fr}
@@ -192,23 +199,57 @@ function render(){
   document.getElementById('empty').classList.toggle('hidden', n>0);
 }
 
+let CURRENT=null;
+function escAttr(s){return esc(s).replace(/"/g,'&quot;');}
 function openDrawer(c){
+  CURRENT=c;
   const d=document.getElementById('drawer');
-  const row=(k,v)=>`<div class="k">${k}</div><div>${esc(v||"—")}</div>`;
+  const ro=(k,v)=>`<div class="k">${k}</div><div>${esc(v||"—")}</div>`;
+  const inp=(id,label,val,type)=>`<label class="fl">${label}</label><input class="fi" id="ed_${id}" type="${type||'text'}" value="${escAttr(val)}">`;
+  const sel=(id,label,val,opts)=>{const o=["",...opts].map(x=>`<option${x===(val||"")?" selected":""}>${esc(x)}</option>`).join("");
+    return `<label class="fl">${label}</label><select class="fi" id="ed_${id}">${o}</select>`;};
   d.innerHTML=`<div class="dh"><button class="close" onclick="closeDrawer()">×</button>
       <h2>${esc(c.ragione)}</h2><div class="sub">${esc(c.codice)} · ${esc(c.settore)} · ${esc(c.provincia)}</div></div>
-    <div class="sec"><h3>Contatti</h3><div class="kv">
-      ${row("Referente",c.referente)}${row("Email",c.email)}${row("Telefono",c.telefono)}${row("Proprietà",c.proprieta)}
-      ${row("Comune",c.comune)}${row("Indirizzo",c.indirizzo)}</div></div>
-    <div class="sec"><h3>Stato commerciale</h3><div class="kv">
-      ${row("Tipologia",c.tipologia)}${row("Status",c.status)}${row("Priorità",c.priorita)}${row("Stato attività",c.stato_attivita)}
-      ${row("Ultima azione",c.data_ultima_azione)}${row("Prossima azione",c.prossima_azione)}
-      ${row("Follow-up",c.data_followup)}${row("Stato follow-up",c.stato_followup)}${row("Esito",c.esito)}</div></div>
-    <div class="sec"><h3>Salute aziendale</h3><div class="kv">
-      ${row("Ultimo bilancio",c.anno_bilancio)}${row("Fatturato bilancio",c.fatturato_bilancio)}${row("Utile/Perdita",c.utile)}
-      ${row("Dipendenti",c.dipendenti)}${row("Rating",c.rating)}${row("Punteggio",c.punteggio)}${row("Limite credito",c.limite_credito)}</div></div>
-    <div class="sec"><h3>Note</h3><div>${esc(c.note||"—")}</div></div>`;
+    <div class="sec"><h3>Contatti</h3>
+      ${inp("referente","Referente acquisti",c.referente)}
+      ${inp("email","Email",c.email)}
+      ${inp("telefono","Telefono",c.telefono)}
+      <div class="kv" style="margin-top:10px">${ro("Proprietà",c.proprieta)}${ro("Comune",c.comune)}${ro("Indirizzo",c.indirizzo)}</div>
+    </div>
+    <div class="sec"><h3>Stato commerciale</h3>
+      ${sel("tipologia","Tipologia",c.tipologia,["Cliente caldo","Cliente raffreddamento","Cliente fermo","Ex-cliente storico","Prospect nuovo"])}
+      ${sel("priorita","Priorità",c.priorita,["Alta","Media","Bassa"])}
+      ${sel("stato_attivita","Stato attività",c.stato_attivita,["Da fare","Contattato","Insistere","Appuntamento fissato","Non interessato"])}
+      ${inp("prossima_azione","Prossima azione",c.prossima_azione)}
+      ${inp("data_followup","Data follow-up",c.data_followup,"date")}
+      ${inp("stato_followup","Stato follow-up",c.stato_followup)}
+      ${inp("esito","Esito ultimo contatto",c.esito)}
+    </div>
+    <div class="sec"><h3>Note</h3><textarea class="fi" id="ed_note" rows="4">${esc(c.note||"")}</textarea></div>
+    <div class="sec"><h3>Salute aziendale (sola lettura)</h3><div class="kv">
+      ${ro("Ultimo bilancio",c.anno_bilancio)}${ro("Fatturato bilancio",c.fatturato_bilancio)}${ro("Utile/Perdita",c.utile)}
+      ${ro("Dipendenti",c.dipendenti)}${ro("Rating",c.rating)}${ro("Punteggio",c.punteggio)}${ro("Limite credito",c.limite_credito)}</div></div>
+    <div class="savebar"><button id="saveBtn">Salva modifiche</button><span id="saveMsg"></span></div>`;
+  document.getElementById('saveBtn').onclick=saveEdit;
   d.classList.add('open'); document.getElementById('ov').classList.add('open');
+}
+async function saveEdit(){
+  if(!CURRENT) return;
+  const ids=["referente","email","telefono","tipologia","priorita","stato_attivita","prossima_azione","data_followup","stato_followup","esito","note"];
+  const fields={};
+  ids.forEach(id=>{const el=document.getElementById('ed_'+id); if(el) fields[id]=el.value;});
+  const btn=document.getElementById('saveBtn'), msg=document.getElementById('saveMsg');
+  btn.disabled=true; btn.textContent="Salvataggio…"; msg.textContent="";
+  try{
+    const r=await fetch(API+"/edit",{method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+TOKEN},
+      body:JSON.stringify({codice:CURRENT.codice,fields})});
+    const j=await r.json();
+    if(r.ok && j.ok){ Object.assign(CURRENT,fields); msg.textContent="Salvato ✓ (nel database entro pochi minuti)"; render(); }
+    else if(r.status===401){ msg.textContent="Sessione scaduta: esci e rientra."; }
+    else{ msg.textContent=j.error||"Errore nel salvataggio."; }
+  }catch(e){ msg.textContent="Errore di rete."; }
+  btn.disabled=false; btn.textContent="Salva modifiche";
 }
 function closeDrawer(){document.getElementById('drawer').classList.remove('open');document.getElementById('ov').classList.remove('open');}
 document.getElementById('ov').onclick=closeDrawer;

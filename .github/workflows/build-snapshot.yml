@@ -6,7 +6,7 @@ name: Build snapshot da Dropbox
 on:
   workflow_dispatch:        # avvio manuale dal tab "Actions"
   schedule:
-    - cron: "*/15 * * * *"  # ogni 15 minuti (near-real-time). Alzabile/abbassabile a piacere.
+    - cron: "*/5 * * * *"  # ogni 5 minuti (near-real-time). Alzabile/abbassabile a piacere.
 
 # Evita esecuzioni sovrapposte
 concurrency:
@@ -27,6 +27,12 @@ jobs:
 
       - name: Installa dipendenze
         run: pip install -r scripts/requirements.txt
+
+      - name: Applica le modifiche in coda al database
+        env:
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+        run: python scripts/apply_edits.py
 
       - name: Costruisci e pubblica snapshot
         env:
