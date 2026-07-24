@@ -72,6 +72,23 @@
   .savebar button{background:var(--dark);color:#fff;border:0;border-radius:8px;padding:11px 20px;font-weight:600;font-size:15px}
   .savebar button:disabled{opacity:.5}
   #saveMsg{font-size:13px;color:var(--mid)}
+  /* NOTE/AZIONI a pillola */
+  .addbtn{float:right;background:transparent;border:0;color:var(--blue);font-size:13px;font-weight:600;cursor:pointer;text-transform:none}
+  .addbox{margin:0 0 10px}
+  .addbox>div{margin-top:6px}
+  .addbox button{background:var(--dark);color:#fff;border:0;border-radius:8px;padding:8px 14px;font-weight:600}
+  .pilllist{display:flex;flex-direction:column;gap:8px}
+  .pempty{font-size:13px;color:var(--mid)}
+  .pill{background:var(--light);border:1px solid var(--line);border-radius:12px;padding:10px 12px;padding-right:58px;position:relative}
+  .pill.azione{background:#eef4ff}
+  .ptext{font-size:14px;white-space:pre-wrap}
+  .pmeta{font-size:11px;color:var(--mid);margin-top:5px}
+  .pacts{position:absolute;top:8px;right:8px;display:flex;gap:2px}
+  .pacts button{background:transparent;border:0;cursor:pointer;font-size:15px;line-height:1;padding:4px;opacity:.55}
+  .pacts button:hover{opacity:1}
+  .pilledit{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-family:inherit}
+  .savepill{background:var(--dark);color:#fff;border:0;border-radius:8px;padding:6px 12px;font-weight:600}
+  .cancelpill{background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 12px;margin-left:6px}
   /* DASHBOARD */
   .dsub{display:flex;gap:6px;padding:12px 16px 0;flex-wrap:wrap}
   .dsub button{background:#fff;border:1px solid var(--line);border-radius:20px;padding:7px 14px;font-size:13px;font-weight:600;color:var(--mid)}
@@ -88,11 +105,24 @@
   .cwrap{position:relative;height:260px}
   .cwrap.tall{height:340px}
   .hint{font-size:11px;color:var(--mid);margin:8px 0 0;text-align:center}
-  .buckets{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
-  .bucket{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;cursor:pointer;text-align:center}
-  .bucket:hover{border-color:var(--sand)}
-  .bucket .n{font-size:30px;font-weight:800}
-  .bucket .t{font-size:13px;color:var(--mid);margin-top:4px}
+  .kpi .sub{font-size:11px;color:var(--mid);margin-top:5px}
+  .dh3{margin:8px 16px 2px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;font-weight:700}
+  .dsubt{margin:0 16px 12px;font-size:12px;color:var(--mid)}
+  .sectors{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+  .sector{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px}
+  .sector .sh{font-weight:800;font-size:15px;letter-spacing:.03em}
+  .sector .sn{font-size:30px;font-weight:800;line-height:1.1}
+  .sector .sl{font-size:12px;color:var(--mid);margin-bottom:8px}
+  .st{width:100%;border-collapse:collapse;font-size:13px}
+  .st th{text-align:left;color:var(--mid);font-weight:600;font-size:11px;text-transform:uppercase;padding:4px 6px;border-bottom:1px solid var(--line)}
+  .st td{padding:6px;border-bottom:1px solid var(--light);cursor:pointer}
+  .st tr:hover td{background:#f4f7fb}
+  .st .num{text-align:right;font-variant-numeric:tabular-nums}
+  .rar{margin-top:10px;font-size:12px;color:#b3261e}
+  .pstrip{display:flex;gap:8px;overflow-x:auto;padding:12px 16px 0;-webkit-overflow-scrolling:touch}
+  .pchip{flex:0 0 auto;background:#fff;border:1px solid var(--line);border-radius:20px;padding:6px 13px;font-size:13px;cursor:pointer;white-space:nowrap}
+  .pchip.on{background:var(--dark);color:#fff;border-color:var(--dark)}
+  .pchip b{font-weight:800;margin-right:5px}
 
   @media (max-width:560px){
     .kv{grid-template-columns:120px 1fr}
@@ -131,6 +161,7 @@
   </nav>
 
   <section id="tab-clienti">
+    <div class="pstrip" id="pstrip"></div>
     <div class="bar">
       <input type="search" id="q" placeholder="Cerca ragione sociale, comune, referente…">
       <select id="fSettore"><option value="">Tutti i settori</option></select>
@@ -146,25 +177,27 @@
     <div class="dsub">
       <button class="on" data-d="mercato">Mercato / Portafoglio</button>
       <button data-d="vendite">Vendite</button>
-      <button data-d="pipeline">Pipeline</button>
     </div>
     <div id="d-mercato" class="dpane">
+      <h3 class="dh3">Overview vendite YTD</h3>
+      <p class="dsubt">Fatturato, ordini, volumi e prezzo medio · confronto pari periodo 2025</p>
       <div class="kpis" id="kpi-mercato"></div>
-      <div class="charts">
-        <div class="chartbox"><h4>Clienti per settore</h4><div class="cwrap"><canvas id="chSettore"></canvas></div><p class="hint">Clicca per filtrare la lista</p></div>
-        <div class="chartbox"><h4>Clienti per stato</h4><div class="cwrap"><canvas id="chStatus"></canvas></div><p class="hint">Clicca per filtrare la lista</p></div>
-        <div class="chartbox"><h4>Clienti per tipologia</h4><div class="cwrap"><canvas id="chTipo"></canvas></div><p class="hint">Clicca per filtrare la lista</p></div>
-      </div>
+      <h3 class="dh3">Salute del portafoglio</h3>
+      <p class="dsubt">Snapshot per settore · clicca una riga per aprire i clienti corrispondenti</p>
+      <div class="sectors" id="sectors"></div>
     </div>
     <div id="d-vendite" class="dpane hidden">
-      <div class="kpis" id="kpi-vendite"></div>
+      <h3 class="dh3">Esposizione finanziaria</h3>
+      <p class="dsubt">Crediti clienti · merce a terra · CBAM</p>
+      <div class="kpis" id="kpi-esp"></div>
+      <div class="chartbox"><table class="st" id="tbl-esp"></table></div>
+      <h3 class="dh3">Magazzino e disponibilità</h3>
+      <p class="dsubt">Materiale a terra e copertura</p>
+      <div class="kpis" id="kpi-mag"></div>
       <div class="charts">
-        <div class="chartbox wide"><h4>Fatturato mensile 2026</h4><div class="cwrap"><canvas id="chMensile"></canvas></div></div>
-        <div class="chartbox wide"><h4>Top 10 clienti per fatturato 2026</h4><div class="cwrap tall"><canvas id="chTop"></canvas></div><p class="hint">Clicca una barra per aprire il cliente</p></div>
+        <div class="chartbox wide"><h4>Dettaglio lotti disponibili</h4><table class="st" id="tbl-lotti"></table></div>
+        <div class="chartbox wide"><h4>Uscite mensili 2026 (tonnellate)</h4><div class="cwrap"><canvas id="chUscite"></canvas></div></div>
       </div>
-    </div>
-    <div id="d-pipeline" class="dpane hidden">
-      <div class="buckets" id="buckets"></div>
     </div>
   </section>
 </div>
@@ -181,6 +214,8 @@ const API = CFG.workerBase.replace(/\/+$/,"");
 let TOKEN = localStorage.getItem('crm_token') || "";
 let DATA = [];
 let VEND = {mensili:[],totali:{}};
+let OPER = {};
+let INTER = {};
 let TIPO = "", PRESET = null, charts = {};
 
 function esc(s){return (s==null?"":String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -212,6 +247,8 @@ async function loadData(){
   const j=await r.json();
   const snap=j.snapshot||{clienti:[]};
   VEND = snap.vendite || {mensili:[],totali:{}};
+  OPER = snap.operativa || {};
+  INTER = j.interazioni || {};
   const byCode={}; (snap.clienti||[]).forEach(c=>{ byCode[c.codice]=Object.assign({},c); });
   // overlay: applica le modifiche in coda (edits) sopra lo snapshot
   (j.edits||[]).forEach(ed=>{ if(ed && ed.codice && byCode[ed.codice]) Object.assign(byCode[ed.codice], ed.fields||{}); });
@@ -272,19 +309,26 @@ function openDrawer(c){
       ${inp("prossima_azione","Prossima azione",c.prossima_azione)}
       ${inp("data_followup","Data follow-up",c.data_followup,"date")}
       ${inp("stato_followup","Stato follow-up",c.stato_followup)}
-      ${inp("esito","Esito ultimo contatto",c.esito)}
     </div>
-    <div class="sec"><h3>Note</h3><textarea class="fi" id="ed_note" rows="4">${esc(c.note||"")}</textarea></div>
+    <div class="sec"><h3>Note <button type="button" class="addbtn" onclick="showAdd('nota')">+ Aggiungi nota</button></h3>
+      <div id="addbox-nota" class="addbox hidden"><textarea id="new-nota" class="fi" rows="2" placeholder="Scrivi una nota…"></textarea><div><button type="button" onclick="addInter('nota')">Aggiungi nota</button></div></div>
+      <div class="pilllist" id="list-nota"></div>
+    </div>
+    <div class="sec"><h3>Azioni <button type="button" class="addbtn" onclick="showAdd('azione')">+ Aggiungi azione</button></h3>
+      <div id="addbox-azione" class="addbox hidden"><textarea id="new-azione" class="fi" rows="2" placeholder="Descrivi l'azione…"></textarea><div><button type="button" onclick="addInter('azione')">Aggiungi azione</button></div></div>
+      <div class="pilllist" id="list-azione"></div>
+    </div>
     <div class="sec"><h3>Salute aziendale (sola lettura)</h3><div class="kv">
       ${ro("Ultimo bilancio",c.anno_bilancio)}${ro("Fatturato bilancio",c.fatturato_bilancio)}${ro("Utile/Perdita",c.utile)}
       ${ro("Dipendenti",c.dipendenti)}${ro("Rating",c.rating)}${ro("Punteggio",c.punteggio)}${ro("Limite credito",c.limite_credito)}</div></div>
     <div class="savebar"><button id="saveBtn">Salva modifiche</button><span id="saveMsg"></span></div>`;
   document.getElementById('saveBtn').onclick=saveEdit;
+  renderInter(c.codice);
   d.classList.add('open'); document.getElementById('ov').classList.add('open');
 }
 async function saveEdit(){
   if(!CURRENT) return;
-  const ids=["referente","email","telefono","tipologia","priorita","stato_attivita","prossima_azione","data_followup","stato_followup","esito","note"];
+  const ids=["referente","email","telefono","tipologia","priorita","stato_attivita","prossima_azione","data_followup","stato_followup"];
   const fields={};
   ids.forEach(id=>{const el=document.getElementById('ed_'+id); if(el) fields[id]=el.value;});
   const btn=document.getElementById('saveBtn'), msg=document.getElementById('saveMsg');
@@ -299,6 +343,58 @@ async function saveEdit(){
     else{ msg.textContent=j.error||"Errore nel salvataggio."; }
   }catch(e){ msg.textContent="Errore di rete."; }
   btn.disabled=false; btn.textContent="Salva modifiche";
+}
+
+// ---------- NOTE / AZIONI (stack) ----------
+function fmtTs(ts){ try{const d=new Date(ts); return d.toLocaleDateString('it-IT')+' '+d.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'});}catch(e){return ts||'';} }
+function renderInter(cod){
+  ['nota','azione'].forEach(tp=>{
+    const list=document.getElementById('list-'+tp); if(!list) return;
+    const items=(INTER[cod]||[]).filter(x=>x.tipo===tp).sort((a,b)=>String(b.ts||'').localeCompare(String(a.ts||'')));
+    if(!items.length){ list.innerHTML=`<div class="pempty">Nessuna ${tp==='nota'?'nota':'azione'} registrata.</div>`; return; }
+    list.innerHTML=items.map(e=>`<div class="pill ${tp==='azione'?'azione':''}" data-id="${e.id}">
+        <div class="ptext">${esc(e.testo)}</div>
+        <div class="pmeta">${fmtTs(e.ts)} · ${esc(e.user||'')}${e.editedTs?' · modificata':''}</div>
+        <div class="pacts"><button type="button" title="Modifica" onclick="editInter('${e.id}')">✎</button><button type="button" title="Elimina" onclick="delInter('${e.id}')">🗑</button></div>
+      </div>`).join("");
+  });
+}
+function showAdd(tp){ const b=document.getElementById('addbox-'+tp); if(b) b.classList.toggle('hidden'); }
+async function apiPost(path,body){
+  const r=await fetch(API+path,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+TOKEN},body:JSON.stringify(body)});
+  let j={}; try{ j=await r.json(); }catch(e){}
+  return {ok:r.ok,status:r.status,j};
+}
+async function addInter(tp){
+  if(!CURRENT) return;
+  const ta=document.getElementById('new-'+tp); const testo=(ta.value||'').trim(); if(!testo) return;
+  const cod=CURRENT.codice;
+  const {ok,j}=await apiPost('/interazione',{codice:cod,tipo:tp,testo});
+  if(ok&&j.entry){ (INTER[cod]=INTER[cod]||[]).push(j.entry); ta.value=''; showAdd(tp); renderInter(cod); }
+  else alert('Errore nel salvataggio.');
+}
+function editInter(id){
+  if(!CURRENT) return;
+  const it=(INTER[CURRENT.codice]||[]).find(x=>x.id===id); if(!it) return;
+  const pill=document.querySelector('.pill[data-id="'+id+'"]'); if(!pill) return;
+  pill.querySelector('.ptext').innerHTML=`<textarea class="pilledit" rows="2">${esc(it.testo)}</textarea>
+     <div style="margin-top:6px"><button type="button" class="savepill" onclick="saveInterEdit('${id}')">Salva</button>
+     <button type="button" class="cancelpill" onclick="renderInter(CURRENT.codice)">Annulla</button></div>`;
+  const acts=pill.querySelector('.pacts'); if(acts) acts.style.display='none';
+}
+async function saveInterEdit(id){
+  const cod=CURRENT.codice; const pill=document.querySelector('.pill[data-id="'+id+'"]'); if(!pill) return;
+  const ta=pill.querySelector('textarea.pilledit'); const testo=(ta.value||'').trim(); if(!testo) return;
+  const {ok}=await apiPost('/interazione-edit',{codice:cod,id,testo});
+  if(ok){ const it=(INTER[cod]||[]).find(x=>x.id===id); if(it){it.testo=testo; it.editedTs=new Date().toISOString();} renderInter(cod); }
+  else alert('Errore nella modifica.');
+}
+async function delInter(id){
+  if(!confirm('Eliminare questa voce?')) return;
+  const cod=CURRENT.codice;
+  const {ok}=await apiPost('/interazione-delete',{codice:cod,id});
+  if(ok){ INTER[cod]=(INTER[cod]||[]).filter(x=>x.id!==id); renderInter(cod); }
+  else alert("Errore nell'eliminazione.");
 }
 function closeDrawer(){document.getElementById('drawer').classList.remove('open');document.getElementById('ov').classList.remove('open');}
 document.getElementById('ov').onclick=closeDrawer;
@@ -320,20 +416,18 @@ document.querySelectorAll('.dsub button').forEach(b=>b.onclick=()=>{
 ['q','fSettore','fStatus','fProv'].forEach(id=>document.getElementById(id).addEventListener('input',()=>{TIPO="";PRESET=null;render();}));
 
 // ---------- DASHBOARD ----------
-const PALETTE=['#26578a','#4c9a6a','#b8860b','#c0616b','#5c6672','#3a6ea5','#8b6d4a','#7a9a8c','#a05ab0','#d08a4b'];
 function euro(n){return "€ "+Math.round(n||0).toLocaleString('it-IT');}
 function tons(n){return (Math.round((n||0)*10)/10).toLocaleString('it-IT')+" t";}
-function kpi(v,l){return `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`;}
-function countBy(key){const m={};DATA.forEach(c=>{const v=c[key]||"—";m[v]=(m[v]||0)+1;});return m;}
+function num(n){return (n==null?0:n).toLocaleString('it-IT');}
+function kpi(v,l,sub){return `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div>${sub?`<div class="sub">${sub}</div>`:''}</div>`;}
 function destroyCharts(){Object.values(charts).forEach(c=>{try{c.destroy();}catch(e){}});charts={};}
 function mkChart(id,type,labels,data,onClick,horizontal){
   const el=document.getElementById(id); if(!el) return;
-  charts[id]=new Chart(el,{type,
-    data:{labels,datasets:[{data,backgroundColor:type==='doughnut'?PALETTE:'#26578a',borderWidth:type==='doughnut'?0:0}]},
-    options:{indexAxis:horizontal?'y':'x',responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:type==='doughnut',position:'bottom'}},
+  charts[id]=new Chart(el,{type,data:{labels,datasets:[{data,backgroundColor:'#26578a'}]},
+    options:{indexAxis:horizontal?'y':'x',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
       onClick:(e,els)=>{if(onClick&&els&&els.length){const i=els[0].index; onClick(labels[i],i);}}}});
 }
+const TIPI=["Cliente caldo","Cliente raffreddamento","Cliente fermo","Ex-cliente storico","Prospect nuovo"];
 function goToClients(o){
   o=o||{};
   document.getElementById('fSettore').value=o.settore||'';
@@ -341,46 +435,75 @@ function goToClients(o){
   document.getElementById('fProv').value='';
   document.getElementById('q').value='';
   TIPO=o.tipo||''; PRESET=o.preset||null;
+  const first=document.querySelector('#pstrip .pchip'); if(first) setActiveChip(first);
   document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('on',x.dataset.tab==='clienti'));
   document.getElementById('tab-clienti').classList.remove('hidden');
   document.getElementById('tab-dash').classList.add('hidden');
   render();
 }
-function renderBuckets(){
-  const today=new Date(new Date().toDateString());
-  const in14=new Date(today.getTime()+14*864e5);
-  const defs=[
-    {t:"Da contattare",f:c=>c.stato_attivita==='Da fare'},
-    {t:"In corso",f:c=>['Contattato','Insistere'].includes(c.stato_attivita)},
-    {t:"Appuntamenti",f:c=>c.stato_attivita==='Appuntamento fissato'},
-    {t:"Follow-up in scadenza (14gg)",f:c=>{if(!c.data_followup)return false;const d=new Date(c.data_followup);return d>=today&&d<=in14;}},
-    {t:"Follow-up scaduti",f:c=>{if(!c.data_followup)return false;return new Date(c.data_followup)<today;}},
-  ];
-  const b=document.getElementById('buckets'); b.innerHTML="";
-  defs.forEach(d=>{const n=DATA.filter(d.f).length; const el=document.createElement('div'); el.className="bucket";
-    el.innerHTML=`<div class="n">${n}</div><div class="t">${d.t}</div>`; el.onclick=()=>goToClients({preset:d.f}); b.appendChild(el);});
+function renderMercato(){
+  const T=VEND.totali||{};
+  document.getElementById('kpi-mercato').innerHTML=
+    kpi(euro(T.fatturato),'Fatturato 2026 YTD','vs 2025: '+euro(T.fatturato_2025))
+   +kpi(tons(T.tonnellate),'Tonnellate 2026 YTD','vs 2025: '+tons(T.tonnellate_2025))
+   +kpi('€ '+num(T.et_medio)+'/t','Prezzo medio 2026','vs 2025: € '+num(T.et_2025)+'/t')
+   +kpi(num(T.ordini),'Movimenti 2026 YTD','')
+   +kpi(num(T.clienti_attivi),'Clienti attivi 2026','');
+  const settori=["Acciaieria","Fonderia","Trading"];
+  const wrap=document.getElementById('sectors'); wrap.innerHTML="";
+  settori.forEach(s=>{
+    const cl=DATA.filter(c=>c.settore===s);
+    const rows=TIPI.map(t=>{const sub=cl.filter(c=>c.tipologia===t);
+      return {t,n:sub.length,fat:sub.reduce((a,c)=>a+(Number(c.fatturato_storico)||0),0)};});
+    const risk=rows.filter(r=>r.t==='Cliente fermo').reduce((a,r)=>a+r.fat,0);
+    const trs=rows.map(r=>`<tr onclick="goToClients({settore:'${s}',tipo:'${r.t}'})"><td>${r.t}</td><td class="num">${r.n}</td><td class="num">${euro(r.fat)}</td></tr>`).join("");
+    const el=document.createElement('div'); el.className="sector";
+    el.innerHTML=`<div class="sh">${s.toUpperCase()}</div><div class="sn">${cl.length}</div><div class="sl">clienti totali</div>
+      <table class="st"><tr><th>Tipologia</th><th class="num">N.</th><th class="num">Fatturato storico</th></tr>${trs}</table>
+      <div class="rar">Revenue at risk (clienti fermi): ${euro(risk)}</div>`;
+    wrap.appendChild(el);
+  });
+}
+function renderVendite(){
+  destroyCharts();
+  const op=OPER||{}, e=op.esposizione||{}, m=op.magazzino||{};
+  document.getElementById('kpi-esp').innerHTML=
+    kpi(euro(e.clienti),'Esposizione clienti','')+kpi(euro(e.merce_a_terra),'Merce a terra','')+kpi(euro(e.totale),'Esposizione totale','');
+  document.getElementById('tbl-esp').innerHTML=
+    `<tr><th>Voce</th><th class="num">€</th><th class="num">$</th></tr>`+
+    (e.voci||[]).map(v=>`<tr><td>${esc(v.voce)}</td><td class="num">${v.eur!=null?euro(v.eur):'—'}</td><td class="num">${v.usd!=null?('$ '+num(Math.round(v.usd))):'—'}</td></tr>`).join("");
+  document.getElementById('kpi-mag').innerHTML=
+    kpi(tons(m.disponibile_ton),'Disponibile a terra','')+kpi(tons(m.uscite_ytd_ton),'Uscite YTD 2026','')+kpi(num(m.mesi_copertura)+' mesi','Copertura','');
+  document.getElementById('tbl-lotti').innerHTML=
+    `<tr><th>Qualità</th><th>Nave/Lotto</th><th class="num">Ton</th><th class="num">€/t</th><th>Note</th></tr>`+
+    (op.lotti||[]).map(l=>`<tr><td>${esc(l.qualita)}</td><td>${esc(l.lotto)}</td><td class="num">${num(l.ton)}</td><td class="num">${l.prezzo_eur!=null?('€ '+num(l.prezzo_eur)):'—'}</td><td>${esc(l.note)}</td></tr>`).join("");
+  const MN=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
+  const us=op.uscite_mensili||[];
+  mkChart('chUscite','bar',us.map(x=>MN[parseInt(x.mese,10)-1]),us.map(x=>x.tonnellate),null);
 }
 function renderDash(){
-  if(typeof Chart==='undefined'||!DATA.length) return;
-  destroyCharts();
-  const T=VEND.totali||{};
-  // MERCATO
-  const nAtt=DATA.filter(c=>c.status==='Attivo').length;
-  document.getElementById('kpi-mercato').innerHTML=
-    kpi(DATA.length,'Clienti totali')+kpi(nAtt,'Clienti attivi')+kpi(euro(T.fatturato),'Fatturato 2026')+kpi(tons(T.tonnellate),'Tonnellate 2026');
-  const set=countBy('settore'); mkChart('chSettore','doughnut',Object.keys(set),Object.values(set),(l)=>goToClients({settore:l==='—'?'':l}));
-  const st=countBy('status');   mkChart('chStatus','bar',Object.keys(st),Object.values(st),(l)=>goToClients({status:l==='—'?'':l}));
-  const tp=countBy('tipologia');mkChart('chTipo','bar',Object.keys(tp),Object.values(tp),(l)=>goToClients({tipo:l==='—'?'':l}));
-  // VENDITE
-  document.getElementById('kpi-vendite').innerHTML=
-    kpi(euro(T.fatturato),'Fatturato 2026')+kpi(tons(T.tonnellate),'Tonnellate 2026')+kpi(T.ordini||0,'Ordini 2026');
-  const MN=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
-  const mesi=VEND.mensili||[];
-  mkChart('chMensile','bar',mesi.map(m=>MN[parseInt(m.mese,10)-1]),mesi.map(m=>m.fatturato),null);
-  const top=[...DATA].filter(c=>(c.fatturato_2026||0)>0).sort((a,b)=>b.fatturato_2026-a.fatturato_2026).slice(0,10);
-  mkChart('chTop','bar',top.map(c=>c.ragione),top.map(c=>c.fatturato_2026),(l,i)=>openDrawer(top[i]),true);
-  // PIPELINE
-  renderBuckets();
+  if(!DATA.length) return;
+  const vend=!document.getElementById('d-vendite').classList.contains('hidden');
+  if(vend){ if(typeof Chart!=='undefined') renderVendite(); }
+  else renderMercato();
+}
+// pipeline come filtro nella sezione Clienti
+const BUCKETS=[
+  {t:"Da contattare",f:c=>c.stato_attivita==='Da fare'},
+  {t:"In corso",f:c=>['Contattato','Insistere'].includes(c.stato_attivita)},
+  {t:"Appuntamenti",f:c=>c.stato_attivita==='Appuntamento fissato'},
+  {t:"Follow-up in scadenza",f:c=>{if(!c.data_followup)return false;const t=new Date(new Date().toDateString());const d=new Date(c.data_followup);return d>=t&&d<=new Date(t.getTime()+14*864e5);}},
+  {t:"Follow-up scaduti",f:c=>{if(!c.data_followup)return false;return new Date(c.data_followup)<new Date(new Date().toDateString());}},
+];
+function setActiveChip(el){document.querySelectorAll('#pstrip .pchip').forEach(x=>x.classList.toggle('on',x===el));}
+function renderPStrip(){
+  const s=document.getElementById('pstrip'); if(!s) return; s.innerHTML="";
+  const all=document.createElement('div'); all.className="pchip on"; all.textContent="Tutti";
+  all.onclick=()=>{PRESET=null;TIPO='';setActiveChip(all);render();}; s.appendChild(all);
+  BUCKETS.forEach(b=>{const n=DATA.filter(b.f).length; const c=document.createElement('div'); c.className="pchip";
+    c.innerHTML=`<b>${n}</b>${b.t}`;
+    c.onclick=()=>{PRESET=b.f;TIPO='';document.getElementById('q').value='';document.getElementById('fSettore').value='';document.getElementById('fStatus').value='';document.getElementById('fProv').value='';setActiveChip(c);render();};
+    s.appendChild(c);});
 }
 
 async function start(){

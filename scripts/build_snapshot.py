@@ -88,30 +88,66 @@ def build(xlsx_bytes: bytes) -> dict:
     except Exception:
         pass
 
-    # Vendite: aggregati 2026 per cliente + serie mensile
+    # ---- Vendite: KPI YTD (pari periodo) + serie mensile + per-cliente ----
     import collections as _c
     vend = {}
     mensili = _c.OrderedDict((f"{m:02d}", {"fatturato":0.0,"tonnellate":0.0}) for m in range(1,13))
-    tot = {"fatturato":0.0,"tonnellate":0.0,"ordini":0}
+    ytd = {2025:{"fatt":0.0,"ton":0.0,"rows":0,"cli":set()}, 2026:{"fatt":0.0,"ton":0.0,"rows":0,"cli":set()}}
+    ref_doy = datetime.date.today().timetuple().tm_yday
+    grid = {}   # cruscotto in testa al foglio Vendite (righe 1-28)
     try:
-        V = wb["Vendite"]; VH=[str(x.value).strip() if x.value else "" for x in V[31]]; VX={h:i for i,h in enumerate(VH)}
-        for row in V.iter_rows(min_row=32, values_only=True):
-            cod = row[VX["Cod.Cli"]] if "Cod.Cli" in VX else None
-            if not cod: continue
-            cod=str(cod).strip()
-            dt = row[VX.get("Data")] if "Data" in VX else None
-            anno = dt.year if isinstance(dt,(datetime.datetime,datetime.date)) else None
-            imp = (row[VX.get("Importo")] or 0) if "Importo" in VX else 0
-            q   = (row[VX.get("Quantità (kg)")] or 0) if "Quantità (kg)" in VX else 0
-            stato = row[VX.get("Stato")] if "Stato" in VX else None
-            d = vend.setdefault(cod, {"fatt":0.0,"ton":0.0,"ord":0})
-            if anno==2026:
-                d["fatt"]+=imp or 0; d["ton"]+=(q or 0)/1000
-                tot["fatturato"]+=imp or 0; tot["tonnellate"]+=(q or 0)/1000
-                mk=f"{dt.month:02d}"; mensili[mk]["fatturato"]+=imp or 0; mensili[mk]["tonnellate"]+=(q or 0)/1000
-                if stato=="Ordine": d["ord"]+=1; tot["ordini"]+=1
+        V = wb["Vendite"]; VX = {}
+        for r, row in enumerate(V.iter_rows(min_row=1, values_only=True), 1):
+            if r <= 28:
+                for c, val in enumerate(row[:14], 1):
+                    if val is not None: grid[(r,c)] = val
+            elif r == 31:
+                VX = {str(x).strip(): i for i, x in enumerate(row) if x}
+            elif r >= 32 and VX:
+                cod = row[VX["Cod.Cli"]] if "Cod.Cli" in VX else None
+                if not cod: continue
+                cod=str(cod).strip()
+                dt = row[VX.get("Data")] if "Data" in VX else None
+                if not isinstance(dt,(datetime.datetime,datetime.date)): continue
+                imp = row[VX.get("Importo")] or 0
+                q   = (row[VX.get("Quantità (kg)")] or 0)/1000
+                if dt.year==2026:
+                    d = vend.setdefault(cod, {"fatt":0.0,"ton":0.0}); d["fatt"]+=imp; d["ton"]+=q
+                    mensili[f"{dt.month:02d}"]["fatturato"]+=imp; mensili[f"{dt.month:02d}"]["tonnellate"]+=q
+                if dt.year in ytd and dt.timetuple().tm_yday<=ref_doy:
+                    y=ytd[dt.year]; y["fatt"]+=imp; y["ton"]+=q; y["rows"]+=1; y["cli"].add(cod)
     except Exception:
         pass
+    def _et(y): return round(y["fatt"]/y["ton"]) if y["ton"] else 0
+    totali = {
+        "fatturato": round(ytd[2026]["fatt"]), "tonnellate": round(ytd[2026]["ton"],1),
+        "ordini": ytd[2026]["rows"], "clienti_attivi": len(ytd[2026]["cli"]), "et_medio": _et(ytd[2026]),
+        "fatturato_2025": round(ytd[2025]["fatt"]), "tonnellate_2025": round(ytd[2025]["ton"],1), "et_2025": _et(ytd[2025]),
+    }
+    # ---- Vista operativa: esposizione finanziaria + magazzino (cruscotto foglio Vendite) ----
+    def g(r,c): return grid.get((r,c))
+    def gnum(r,c):
+        v=g(r,c)
+        try: return round(float(v),2)
+        except: return None
+    operativa = {}
+    try:
+        operativa["esposizione"] = {
+            "clienti": gnum(8,1), "merce_a_terra": gnum(8,6), "totale": gnum(8,11),
+            "voci": [{"voce":g(r,9), "eur":gnum(r,12), "usd":gnum(r,14)} for r in range(20,24) if g(r,9)],
+        }
+        operativa["magazzino"] = {
+            "disponibile_ton": gnum(15,1), "uscite_ytd_ton": gnum(15,6), "mesi_copertura": gnum(15,11),
+        }
+        lotti=[]; r=20
+        while g(r,1) and str(g(r,1)).strip().upper()!="TOTALE" and r<30:
+            lotti.append({"qualita":g(r,1),"lotto":g(r,2),"ton":gnum(r,3),"prezzo_usd":gnum(r,4),"prezzo_eur":gnum(r,5),"note":g(r,6)})
+            r+=1
+        operativa["lotti"]=lotti
+        mk=["01","02","03","04","05","06","07","08","09","10","11","12"]
+        operativa["uscite_mensili"]=[{"mese":mk[i],"tonnellate":gnum(28,i+1) or 0} for i in range(12)]
+    except Exception:
+        operativa={}
 
     clients = []
     for row in M.iter_rows(min_row=2, values_only=True):
@@ -131,9 +167,8 @@ def build(xlsx_bytes: bytes) -> dict:
             rec["n_tentativi"] = rg.get("ntent")
             rec["stato_followup"] = conv(rg.get("stato"))
         va = vend.get(str(cod).strip())
-        rec["fatturato_2026"]     = round(va["fatt"]) if va else 0
-        rec["tonnellate_2026"]    = round(va["ton"],1) if va else 0
-        rec["ordini_aperti_2026"] = va["ord"] if va else 0
+        rec["fatturato_2026"]  = round(va["fatt"]) if va else 0
+        rec["tonnellate_2026"] = round(va["ton"],1) if va else 0
         clients.append(rec)
     wb.close()
     return {
@@ -142,8 +177,9 @@ def build(xlsx_bytes: bytes) -> dict:
         "clienti": clients,
         "vendite": {
             "mensili": [{"mese":k, "fatturato":round(v["fatturato"]), "tonnellate":round(v["tonnellate"],1)} for k,v in mensili.items()],
-            "totali": {"fatturato":round(tot["fatturato"]), "tonnellate":round(tot["tonnellate"],1), "ordini":tot["ordini"]},
+            "totali": totali,
         },
+        "operativa": operativa,
     }
 
 def main():
