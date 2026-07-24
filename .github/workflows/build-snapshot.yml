@@ -1,0 +1,35 @@
+name: Build snapshot da Dropbox
+
+# Genera snapshot.json dal database Excel su Dropbox e lo ricarica nella App Folder.
+# Non tocca il repository (nessun dato viene committato).
+
+on:
+  workflow_dispatch:        # avvio manuale dal tab "Actions"
+  schedule:
+    - cron: "*/15 * * * *"  # ogni 15 minuti (near-real-time). Alzabile/abbassabile a piacere.
+
+# Evita esecuzioni sovrapposte
+concurrency:
+  group: build-snapshot
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installa dipendenze
+        run: pip install -r scripts/requirements.txt
+
+      - name: Costruisci e pubblica snapshot
+        env:
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+        run: python scripts/build_snapshot.py

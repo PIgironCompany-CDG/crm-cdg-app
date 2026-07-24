@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CRM CDG</title>
+<style>
+  :root{--dark:#2b3138;--mid:#5c6672;--sand:#cbd3db;--light:#eef1f4;--bg:#f7f8fa;--line:#dde1e6;
+        --ok:#1f8a4c;--warn:#b8860b;--cold:#3a6ea5;--ex:#8a8a8a;}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--dark)}
+  header{background:var(--dark);color:#fff;padding:12px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  header h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.02em}
+  header .sp{flex:1}
+  .status{font-size:12px;color:#cbd3db}
+  button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--dark);padding:8px 14px;font-weight:600}
+  button.primary{background:#fff;color:var(--dark)}
+  header button{background:#3a4450;color:#fff;border:0}
+  .bar{padding:14px 20px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:#fff;border-bottom:1px solid var(--line)}
+  .bar input,.bar select{padding:8px 10px;border:1px solid var(--line);border-radius:8px;font:inherit}
+  .bar input[type=search]{min-width:220px}
+  .banner{background:#fff7e6;border:1px solid #f0d59a;color:#7a5b00;padding:8px 14px;border-radius:8px;font-size:13px;margin:0}
+  .wrap{padding:16px 20px 60px}
+  table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);font-size:14px;vertical-align:top}
+  th{background:var(--light);font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:var(--mid);position:sticky;top:0}
+  tr:hover td{background:#f4f7fb;cursor:pointer}
+  .tag{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700}
+  .t-caldo{background:#e2efda;color:#1f8a4c}.t-raffreddamento{background:#fff2cc;color:#8a6d00}
+  .t-fermo{background:#f2f2f2;color:#666}.t-ex{background:#eee;color:#888}.t-prospect{background:#ddeeff;color:#26578a}
+  .count{font-size:13px;color:var(--mid);padding:0 20px 10px}
+  /* drawer */
+  .ov{position:fixed;inset:0;background:rgba(20,24,28,.45);display:none}
+  .ov.open{display:block}
+  .drawer{position:fixed;top:0;right:0;height:100%;width:min(520px,92vw);background:#fff;box-shadow:-6px 0 24px rgba(0,0,0,.15);
+          transform:translateX(100%);transition:transform .18s;overflow:auto}
+  .drawer.open{transform:translateX(0)}
+  .drawer .dh{background:var(--dark);color:#fff;padding:16px 20px}
+  .drawer .dh h2{margin:0;font-size:18px}
+  .drawer .dh .sub{color:#cbd3db;font-size:13px;margin-top:4px}
+  .sec{padding:14px 20px;border-bottom:1px solid var(--line)}
+  .sec h3{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mid)}
+  .kv{display:grid;grid-template-columns:150px 1fr;gap:6px 12px;font-size:14px}
+  .kv .k{color:var(--mid)}
+  .close{float:right;background:transparent;border:0;color:#fff;font-size:22px;cursor:pointer;line-height:1}
+  .empty{padding:40px;text-align:center;color:var(--mid)}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">CRM CDG</h1>
+  <span class="sp"></span>
+  <span class="status" id="status">non collegato</span>
+  <button id="auth">Accedi a Dropbox</button>
+</header>
+
+<div class="bar">
+  <input type="search" id="q" placeholder="Cerca ragione sociale, comune, referente…">
+  <select id="fSettore"><option value="">Tutti i settori</option></select>
+  <select id="fStatus"><option value="">Tutti gli stati</option></select>
+  <select id="fProv"><option value="">Tutte le province</option></select>
+</div>
+
+<div class="wrap">
+  <p class="banner" id="banner" style="display:none"></p>
+  <div class="count" id="count"></div>
+  <table id="tbl">
+    <thead><tr>
+      <th>Ragione sociale</th><th>Settore</th><th>Prov.</th><th>Tipologia</th>
+      <th>Prossima azione</th><th>Follow-up</th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="empty" id="empty" style="display:none">Nessun cliente corrisponde ai filtri.</div>
+</div>
+
+<div class="ov" id="ov"></div>
+<div class="drawer" id="drawer"></div>
+
+<script src="config.js"></script>
+<script>
+const CFG = window.CRM_CONFIG;
+document.getElementById('title').textContent = CFG.appTitle || "CRM";
+const LS = { at:"dbx_access_token", rt:"dbx_refresh_token" };
+let DATA = [];   // clienti
+
+// ---------- PKCE ----------
+function b64url(bytes){let s="";const a=new Uint8Array(bytes);for(let i=0;i<a.length;i++)s+=String.fromCharCode(a[i]);
+  return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+async function challenge(v){const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));return b64url(d);}
+function makeVerifier(){const a=new Uint8Array(48);crypto.getRandomValues(a);return b64url(a.buffer);}
+
+async function login(){
+  const v=makeVerifier(); sessionStorage.setItem('pkce_v',v);
+  const c=await challenge(v);
+  const u="https://www.dropbox.com/oauth2/authorize?client_id="+encodeURIComponent(CFG.dropboxAppKey)
+    +"&response_type=code&token_access_type=offline"
+    +"&redirect_uri="+encodeURIComponent(CFG.redirectUri)
+    +"&code_challenge="+encodeURIComponent(c)+"&code_challenge_method=S256";
+  location.href=u;
+}
+async function exchange(code){
+  const v=sessionStorage.getItem('pkce_v')||"";
+  const body=new URLSearchParams({code,grant_type:"authorization_code",client_id:CFG.dropboxAppKey,
+    code_verifier:v,redirect_uri:CFG.redirectUri});
+  const r=await fetch("https://api.dropboxapi.com/oauth2/token",{method:"POST",
+    headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
+  const j=await r.json();
+  if(j.access_token){localStorage.setItem(LS.at,j.access_token);
+    if(j.refresh_token)localStorage.setItem(LS.rt,j.refresh_token);}
+  return !!j.access_token;
+}
+async function refresh(){
+  const rt=localStorage.getItem(LS.rt); if(!rt)return false;
+  const body=new URLSearchParams({grant_type:"refresh_token",refresh_token:rt,client_id:CFG.dropboxAppKey});
+  const r=await fetch("https://api.dropboxapi.com/oauth2/token",{method:"POST",
+    headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
+  const j=await r.json();
+  if(j.access_token){localStorage.setItem(LS.at,j.access_token);return true;}
+  return false;
+}
+
+// ---------- Dropbox: scarica snapshot ----------
+async function dl(path){
+  let at=localStorage.getItem(LS.at);
+  if(!at)return null;
+  const call=(tok)=>fetch("https://content.dropboxapi.com/2/files/download",{method:"POST",
+    headers:{"Authorization":"Bearer "+tok,"Dropbox-API-Arg":JSON.stringify({path})}});
+  let r=await call(at);
+  if(r.status===401){ if(await refresh()){ at=localStorage.getItem(LS.at); r=await call(at);} }
+  if(!r.ok)return null;
+  return await r.json();
+}
+
+// ---------- Rendering ----------
+const DEMO={generato:"demo",clienti:[
+  {codice:"DEMO1",ragione:"Fonderia Esempio S.r.l.",settore:"Fonderia",tipologia:"Cliente caldo",status:"Attivo",
+   provincia:"BS",comune:"Brescia",prossima_azione:"Richiamare per offerta",data_followup:"2026-09-01",
+   referente:"Mario Rossi",email:"info@esempio.it"},
+  {codice:"DEMO2",ragione:"Acciaieria Demo S.p.A.",settore:"Acciaieria",tipologia:"Cliente raffreddamento",status:"Fermo",
+   provincia:"BG",comune:"Bergamo",prossima_azione:"Verifica copertura materiale",data_followup:"",
+   referente:"",email:""}
+]};
+
+function tclass(t){t=(t||"").toLowerCase();
+  if(t.includes("caldo"))return"t-caldo";if(t.includes("raffred"))return"t-raffreddamento";
+  if(t.includes("fermo"))return"t-fermo";if(t.includes("ex"))return"t-ex";if(t.includes("prospect"))return"t-prospect";return"";}
+function fillSelect(id,vals){const s=document.getElementById(id);[...new Set(vals.filter(Boolean))].sort()
+  .forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v;s.appendChild(o);});}
+
+function render(){
+  const q=document.getElementById('q').value.toLowerCase();
+  const fs=document.getElementById('fSettore').value,fst=document.getElementById('fStatus').value,fp=document.getElementById('fProv').value;
+  const rows=document.getElementById('rows');rows.innerHTML="";
+  let n=0;
+  DATA.filter(c=>{
+    if(fs&&c.settore!==fs)return false; if(fst&&c.status!==fst)return false; if(fp&&c.provincia!==fp)return false;
+    if(q){const blob=((c.ragione||"")+" "+(c.comune||"")+" "+(c.referente||"")+" "+(c.codice||"")).toLowerCase();
+      if(!blob.includes(q))return false;}
+    return true;
+  }).forEach(c=>{
+    n++;const tr=document.createElement('tr');tr.onclick=()=>openDrawer(c);
+    tr.innerHTML=`<td><b>${esc(c.ragione)}</b></td><td>${esc(c.settore)}</td><td>${esc(c.provincia)}</td>
+      <td><span class="tag ${tclass(c.tipologia)}">${esc(c.tipologia||"—")}</span></td>
+      <td>${esc(c.prossima_azione||"—")}</td><td>${esc(c.data_followup||"—")}</td>`;
+    rows.appendChild(tr);
+  });
+  document.getElementById('count').textContent=`${n} clienti`;
+  document.getElementById('empty').style.display=n?"none":"block";
+}
+function esc(s){return (s==null?"":String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function openDrawer(c){
+  const d=document.getElementById('drawer');
+  const row=(k,v)=>`<div class="k">${k}</div><div>${esc(v||"—")}</div>`;
+  d.innerHTML=`<div class="dh"><button class="close" onclick="closeDrawer()">×</button>
+      <h2>${esc(c.ragione)}</h2><div class="sub">${esc(c.codice)} · ${esc(c.settore)} · ${esc(c.provincia)}</div></div>
+    <div class="sec"><h3>Contatti</h3><div class="kv">
+      ${row("Referente",c.referente)}${row("Email",c.email)}${row("Telefono",c.telefono)}${row("Proprietà",c.proprieta)}
+      ${row("Comune",c.comune)}${row("Indirizzo",c.indirizzo)}</div></div>
+    <div class="sec"><h3>Stato commerciale</h3><div class="kv">
+      ${row("Tipologia",c.tipologia)}${row("Status",c.status)}${row("Priorità",c.priorita)}${row("Stato attività",c.stato_attivita)}
+      ${row("Ultima azione",c.data_ultima_azione)}${row("Prossima azione",c.prossima_azione)}
+      ${row("Follow-up",c.data_followup)}${row("Stato follow-up",c.stato_followup)}${row("Esito",c.esito)}</div></div>
+    <div class="sec"><h3>Salute aziendale</h3><div class="kv">
+      ${row("Ultimo bilancio",c.anno_bilancio)}${row("Fatturato bilancio",c.fatturato_bilancio)}${row("Utile/Perdita",c.utile)}
+      ${row("Dipendenti",c.dipendenti)}${row("Rating",c.rating)}${row("Punteggio",c.punteggio)}${row("Limite credito",c.limite_credito)}</div></div>
+    <div class="sec"><h3>Note</h3><div>${esc(c.note||"—")}</div></div>`;
+  d.classList.add('open');document.getElementById('ov').classList.add('open');
+}
+function closeDrawer(){document.getElementById('drawer').classList.remove('open');document.getElementById('ov').classList.remove('open');}
+document.getElementById('ov').onclick=closeDrawer;
+
+function loadData(snap,isDemo){
+  DATA=snap.clienti||[];
+  fillSelect('fSettore',DATA.map(c=>c.settore));
+  fillSelect('fStatus',DATA.map(c=>c.status));
+  fillSelect('fProv',DATA.map(c=>c.provincia));
+  const b=document.getElementById('banner');
+  if(isDemo){b.style.display="block";b.textContent="Dati dimostrativi. Accedi a Dropbox per caricare i dati reali del CRM.";}
+  else{b.style.display="none";document.getElementById('status').textContent="collegato · aggiornato "+(snap.generato||"");}
+  render();
+}
+
+['q','fSettore','fStatus','fProv'].forEach(id=>document.getElementById(id).addEventListener('input',render));
+document.getElementById('auth').onclick=login;
+
+// ---------- avvio ----------
+(async ()=>{
+  const params=new URLSearchParams(location.search);
+  if(params.get('code')){
+    await exchange(params.get('code'));
+    history.replaceState({},"",location.pathname);   // pulisci l'URL
+  }
+  if(localStorage.getItem(LS.at)||localStorage.getItem(LS.rt)){
+    document.getElementById('status').textContent="collegato";
+    const snap=await dl(CFG.snapshotPath);
+    if(snap){loadData(snap,false);return;}
+    document.getElementById('status').textContent="collegato · snapshot non ancora disponibile";
+  }
+  loadData(DEMO,true);   // fallback: mostra layout con dati finti
+})();
+</script>
+</body>
+</html>

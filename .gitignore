@@ -1,0 +1,23 @@
+# --- Dati clienti e segreti: NON devono MAI finire nel repository pubblico ---
+*.xlsx
+*.xls
+*.xlsm
+snapshot.json
+edits.jsonl
+pipeline_data.*
+*.env
+.env
+secrets*
+*token*
+*refresh*
+
+# --- File di sistema / temporanei ---
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+*.tmp
+~$*
