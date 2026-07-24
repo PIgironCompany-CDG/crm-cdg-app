@@ -88,6 +88,31 @@ def build(xlsx_bytes: bytes) -> dict:
     except Exception:
         pass
 
+    # Vendite: aggregati 2026 per cliente + serie mensile
+    import collections as _c
+    vend = {}
+    mensili = _c.OrderedDict((f"{m:02d}", {"fatturato":0.0,"tonnellate":0.0}) for m in range(1,13))
+    tot = {"fatturato":0.0,"tonnellate":0.0,"ordini":0}
+    try:
+        V = wb["Vendite"]; VH=[str(x.value).strip() if x.value else "" for x in V[31]]; VX={h:i for i,h in enumerate(VH)}
+        for row in V.iter_rows(min_row=32, values_only=True):
+            cod = row[VX["Cod.Cli"]] if "Cod.Cli" in VX else None
+            if not cod: continue
+            cod=str(cod).strip()
+            dt = row[VX.get("Data")] if "Data" in VX else None
+            anno = dt.year if isinstance(dt,(datetime.datetime,datetime.date)) else None
+            imp = (row[VX.get("Importo")] or 0) if "Importo" in VX else 0
+            q   = (row[VX.get("Quantità (kg)")] or 0) if "Quantità (kg)" in VX else 0
+            stato = row[VX.get("Stato")] if "Stato" in VX else None
+            d = vend.setdefault(cod, {"fatt":0.0,"ton":0.0,"ord":0})
+            if anno==2026:
+                d["fatt"]+=imp or 0; d["ton"]+=(q or 0)/1000
+                tot["fatturato"]+=imp or 0; tot["tonnellate"]+=(q or 0)/1000
+                mk=f"{dt.month:02d}"; mensili[mk]["fatturato"]+=imp or 0; mensili[mk]["tonnellate"]+=(q or 0)/1000
+                if stato=="Ordine": d["ord"]+=1; tot["ordini"]+=1
+    except Exception:
+        pass
+
     clients = []
     for row in M.iter_rows(min_row=2, values_only=True):
         cod = row[HX["Codice"]] if "Codice" in HX else None
@@ -105,12 +130,20 @@ def build(xlsx_bytes: bytes) -> dict:
             rec["data_followup"] = conv(rg.get("followup"))
             rec["n_tentativi"] = rg.get("ntent")
             rec["stato_followup"] = conv(rg.get("stato"))
+        va = vend.get(str(cod).strip())
+        rec["fatturato_2026"]     = round(va["fatt"]) if va else 0
+        rec["tonnellate_2026"]    = round(va["ton"],1) if va else 0
+        rec["ordini_aperti_2026"] = va["ord"] if va else 0
         clients.append(rec)
     wb.close()
     return {
         "generato": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
         "n_clienti": len(clients),
         "clienti": clients,
+        "vendite": {
+            "mensili": [{"mese":k, "fatturato":round(v["fatturato"]), "tonnellate":round(v["tonnellate"],1)} for k,v in mensili.items()],
+            "totali": {"fatturato":round(tot["fatturato"]), "tonnellate":round(tot["tonnellate"],1), "ordini":tot["ordini"]},
+        },
     }
 
 def main():

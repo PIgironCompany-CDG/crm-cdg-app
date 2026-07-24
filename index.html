@@ -72,12 +72,34 @@
   .savebar button{background:var(--dark);color:#fff;border:0;border-radius:8px;padding:11px 20px;font-weight:600;font-size:15px}
   .savebar button:disabled{opacity:.5}
   #saveMsg{font-size:13px;color:var(--mid)}
+  /* DASHBOARD */
+  .dsub{display:flex;gap:6px;padding:12px 16px 0;flex-wrap:wrap}
+  .dsub button{background:#fff;border:1px solid var(--line);border-radius:20px;padding:7px 14px;font-size:13px;font-weight:600;color:var(--mid)}
+  .dsub button.on{background:var(--dark);color:#fff;border-color:var(--dark)}
+  .dpane{padding:14px 16px 80px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px}
+  .kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px}
+  .kpi .v{font-size:21px;font-weight:700}
+  .kpi .l{font-size:12px;color:var(--mid);margin-top:2px}
+  .charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+  .chartbox{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px}
+  .chartbox.wide{grid-column:1/-1}
+  .chartbox h4{margin:0 0 8px;font-size:14px}
+  .cwrap{position:relative;height:260px}
+  .cwrap.tall{height:340px}
+  .hint{font-size:11px;color:var(--mid);margin:8px 0 0;text-align:center}
+  .buckets{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
+  .bucket{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;cursor:pointer;text-align:center}
+  .bucket:hover{border-color:var(--sand)}
+  .bucket .n{font-size:30px;font-weight:800}
+  .bucket .t{font-size:13px;color:var(--mid);margin-top:4px}
 
   @media (max-width:560px){
     .kv{grid-template-columns:120px 1fr}
     header .who{max-width:30vw}
   }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -121,7 +143,29 @@
   </section>
 
   <section id="tab-dash" class="hidden">
-    <div id="dash">Le dashboard (mercato, vendite, pipeline, magazzino) arrivano nel prossimo step.</div>
+    <div class="dsub">
+      <button class="on" data-d="mercato">Mercato / Portafoglio</button>
+      <button data-d="vendite">Vendite</button>
+      <button data-d="pipeline">Pipeline</button>
+    </div>
+    <div id="d-mercato" class="dpane">
+      <div class="kpis" id="kpi-mercato"></div>
+      <div class="charts">
+        <div class="chartbox"><h4>Clienti per settore</h4><div class="cwrap"><canvas id="chSettore"></canvas></div><p class="hint">Clicca per filtrare la lista</p></div>
+        <div class="chartbox"><h4>Clienti per stato</h4><div class="cwrap"><canvas id="chStatus"></canvas></div><p class="hint">Clicca per filtrare la lista</p></div>
+        <div class="chartbox"><h4>Clienti per tipologia</h4><div class="cwrap"><canvas id="chTipo"></canvas></div><p class="hint">Clicca per filtrare la lista</p></div>
+      </div>
+    </div>
+    <div id="d-vendite" class="dpane hidden">
+      <div class="kpis" id="kpi-vendite"></div>
+      <div class="charts">
+        <div class="chartbox wide"><h4>Fatturato mensile 2026</h4><div class="cwrap"><canvas id="chMensile"></canvas></div></div>
+        <div class="chartbox wide"><h4>Top 10 clienti per fatturato 2026</h4><div class="cwrap tall"><canvas id="chTop"></canvas></div><p class="hint">Clicca una barra per aprire il cliente</p></div>
+      </div>
+    </div>
+    <div id="d-pipeline" class="dpane hidden">
+      <div class="buckets" id="buckets"></div>
+    </div>
   </section>
 </div>
 
@@ -136,6 +180,8 @@ document.getElementById('ltitle').textContent = CFG.appTitle || "CRM";
 const API = CFG.workerBase.replace(/\/+$/,"");
 let TOKEN = localStorage.getItem('crm_token') || "";
 let DATA = [];
+let VEND = {mensili:[],totali:{}};
+let TIPO = "", PRESET = null, charts = {};
 
 function esc(s){return (s==null?"":String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function tclass(t){t=(t||"").toLowerCase();
@@ -165,6 +211,7 @@ async function loadData(){
   if(r.status===401){ throw new Error("unauth"); }
   const j=await r.json();
   const snap=j.snapshot||{clienti:[]};
+  VEND = snap.vendite || {mensili:[],totali:{}};
   const byCode={}; (snap.clienti||[]).forEach(c=>{ byCode[c.codice]=Object.assign({},c); });
   // overlay: applica le modifiche in coda (edits) sopra lo snapshot
   (j.edits||[]).forEach(ed=>{ if(ed && ed.codice && byCode[ed.codice]) Object.assign(byCode[ed.codice], ed.fields||{}); });
@@ -184,6 +231,8 @@ function render(){
   let n=0;
   DATA.filter(c=>{
     if(fs&&c.settore!==fs)return false; if(fst&&c.status!==fst)return false; if(fp&&c.provincia!==fp)return false;
+    if(TIPO&&c.tipologia!==TIPO)return false;
+    if(PRESET&&!PRESET(c))return false;
     if(q){const b=((c.ragione||"")+" "+(c.comune||"")+" "+(c.referente||"")+" "+(c.codice||"")).toLowerCase(); if(!b.includes(q))return false;}
     return true;
   }).forEach(c=>{
@@ -254,13 +303,85 @@ async function saveEdit(){
 function closeDrawer(){document.getElementById('drawer').classList.remove('open');document.getElementById('ov').classList.remove('open');}
 document.getElementById('ov').onclick=closeDrawer;
 
-// tabs
+// tabs principali
 document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('on',x===b));
   document.getElementById('tab-clienti').classList.toggle('hidden', b.dataset.tab!=='clienti');
   document.getElementById('tab-dash').classList.toggle('hidden', b.dataset.tab!=='dash');
+  if(b.dataset.tab==='dash') renderDash();
 });
-['q','fSettore','fStatus','fProv'].forEach(id=>document.getElementById(id).addEventListener('input',render));
+// sotto-tab dashboard
+document.querySelectorAll('.dsub button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.dsub button').forEach(x=>x.classList.toggle('on',x===b));
+  ['mercato','vendite','pipeline'].forEach(d=>document.getElementById('d-'+d).classList.toggle('hidden',d!==b.dataset.d));
+  renderDash();
+});
+// i filtri manuali azzerano tipologia/preset impostati dai click dashboard
+['q','fSettore','fStatus','fProv'].forEach(id=>document.getElementById(id).addEventListener('input',()=>{TIPO="";PRESET=null;render();}));
+
+// ---------- DASHBOARD ----------
+const PALETTE=['#26578a','#4c9a6a','#b8860b','#c0616b','#5c6672','#3a6ea5','#8b6d4a','#7a9a8c','#a05ab0','#d08a4b'];
+function euro(n){return "€ "+Math.round(n||0).toLocaleString('it-IT');}
+function tons(n){return (Math.round((n||0)*10)/10).toLocaleString('it-IT')+" t";}
+function kpi(v,l){return `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`;}
+function countBy(key){const m={};DATA.forEach(c=>{const v=c[key]||"—";m[v]=(m[v]||0)+1;});return m;}
+function destroyCharts(){Object.values(charts).forEach(c=>{try{c.destroy();}catch(e){}});charts={};}
+function mkChart(id,type,labels,data,onClick,horizontal){
+  const el=document.getElementById(id); if(!el) return;
+  charts[id]=new Chart(el,{type,
+    data:{labels,datasets:[{data,backgroundColor:type==='doughnut'?PALETTE:'#26578a',borderWidth:type==='doughnut'?0:0}]},
+    options:{indexAxis:horizontal?'y':'x',responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:type==='doughnut',position:'bottom'}},
+      onClick:(e,els)=>{if(onClick&&els&&els.length){const i=els[0].index; onClick(labels[i],i);}}}});
+}
+function goToClients(o){
+  o=o||{};
+  document.getElementById('fSettore').value=o.settore||'';
+  document.getElementById('fStatus').value=o.status||'';
+  document.getElementById('fProv').value='';
+  document.getElementById('q').value='';
+  TIPO=o.tipo||''; PRESET=o.preset||null;
+  document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('on',x.dataset.tab==='clienti'));
+  document.getElementById('tab-clienti').classList.remove('hidden');
+  document.getElementById('tab-dash').classList.add('hidden');
+  render();
+}
+function renderBuckets(){
+  const today=new Date(new Date().toDateString());
+  const in14=new Date(today.getTime()+14*864e5);
+  const defs=[
+    {t:"Da contattare",f:c=>c.stato_attivita==='Da fare'},
+    {t:"In corso",f:c=>['Contattato','Insistere'].includes(c.stato_attivita)},
+    {t:"Appuntamenti",f:c=>c.stato_attivita==='Appuntamento fissato'},
+    {t:"Follow-up in scadenza (14gg)",f:c=>{if(!c.data_followup)return false;const d=new Date(c.data_followup);return d>=today&&d<=in14;}},
+    {t:"Follow-up scaduti",f:c=>{if(!c.data_followup)return false;return new Date(c.data_followup)<today;}},
+  ];
+  const b=document.getElementById('buckets'); b.innerHTML="";
+  defs.forEach(d=>{const n=DATA.filter(d.f).length; const el=document.createElement('div'); el.className="bucket";
+    el.innerHTML=`<div class="n">${n}</div><div class="t">${d.t}</div>`; el.onclick=()=>goToClients({preset:d.f}); b.appendChild(el);});
+}
+function renderDash(){
+  if(typeof Chart==='undefined'||!DATA.length) return;
+  destroyCharts();
+  const T=VEND.totali||{};
+  // MERCATO
+  const nAtt=DATA.filter(c=>c.status==='Attivo').length;
+  document.getElementById('kpi-mercato').innerHTML=
+    kpi(DATA.length,'Clienti totali')+kpi(nAtt,'Clienti attivi')+kpi(euro(T.fatturato),'Fatturato 2026')+kpi(tons(T.tonnellate),'Tonnellate 2026');
+  const set=countBy('settore'); mkChart('chSettore','doughnut',Object.keys(set),Object.values(set),(l)=>goToClients({settore:l==='—'?'':l}));
+  const st=countBy('status');   mkChart('chStatus','bar',Object.keys(st),Object.values(st),(l)=>goToClients({status:l==='—'?'':l}));
+  const tp=countBy('tipologia');mkChart('chTipo','bar',Object.keys(tp),Object.values(tp),(l)=>goToClients({tipo:l==='—'?'':l}));
+  // VENDITE
+  document.getElementById('kpi-vendite').innerHTML=
+    kpi(euro(T.fatturato),'Fatturato 2026')+kpi(tons(T.tonnellate),'Tonnellate 2026')+kpi(T.ordini||0,'Ordini 2026');
+  const MN=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
+  const mesi=VEND.mensili||[];
+  mkChart('chMensile','bar',mesi.map(m=>MN[parseInt(m.mese,10)-1]),mesi.map(m=>m.fatturato),null);
+  const top=[...DATA].filter(c=>(c.fatturato_2026||0)>0).sort((a,b)=>b.fatturato_2026-a.fatturato_2026).slice(0,10);
+  mkChart('chTop','bar',top.map(c=>c.ragione),top.map(c=>c.fatturato_2026),(l,i)=>openDrawer(top[i]),true);
+  // PIPELINE
+  renderBuckets();
+}
 
 async function start(){
   document.getElementById('login').classList.add('hidden');
