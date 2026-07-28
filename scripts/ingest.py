@@ -11,10 +11,13 @@ Crea /caricamenti se non esiste. Lo snapshot lo rigenera build_snapshot.py.
 
 Env: DROPBOX_APP_KEY, DROPBOX_REFRESH_TOKEN
 """
-import os, io, json, datetime, sys, re, requests, openpyxl
+import os, io, json, datetime, sys, re, zipfile, subprocess, tempfile, requests, openpyxl
 
 APP_KEY=os.environ["DROPBOX_APP_KEY"]; REFRESH=os.environ["DROPBOX_REFRESH_TOKEN"]
-CARIC="/caricamenti"; OPERATIVA="/operativa.json"
+CARIC="/caricamenti"; OPERATIVA="/operativa.json"; DBX="/crm-database.xlsx"
+CREDIT=[("Rating credito","rating",False),("Punteggio credito","punteggio",True),
+        ("Limite credito report (€)","limite",True),("Proprietà","prop",False),
+        ("Segnalazioni credito","segnalazioni",False),("Fatturato bilancio (€)","fatt_stim",True)]
 TOKEN_URL="https://api.dropbox.com/oauth2/token"
 DL="https://content.dropboxapi.com/2/files/download"
 UL="https://content.dropboxapi.com/2/files/upload"
@@ -105,11 +108,90 @@ def parse_uscite(b):
 
 def classify(name):
     u=name.upper()
-    if not u.endswith(".XLSX"): return "altro"
-    if "ESPOSIZIONE" in u: return "esposizione"
-    if "MAGAZZINO" in u or "INVENDUTO" in u: return "magazzino"
-    if "USCITE" in u: return "uscite"
+    if u.endswith(".PDF") and re.match(r'[A-Z]{2,4}\d{3}', u): return "bilancio"   # CODICE - Ragione.pdf
+    if u.endswith(".XLSX"):
+        if "ESPOSIZIONE" in u: return "esposizione"
+        if "MAGAZZINO" in u or "INVENDUTO" in u: return "magazzino"
+        if "USCITE" in u: return "uscite"
     return "altro"
+
+# ---------- BILANCI (report reportaziende.it) ----------
+def code_from_name(name):
+    m=re.match(r'\s*([A-Za-z]{2,4}\d{3})', name); return m.group(1).upper() if m else None
+def colletter(i):
+    i+=1; s=""
+    while i>0: i,r=divmod(i-1,26); s=chr(65+r)+s
+    return s
+def val_eur(s):
+    m=re.search(r'([\d.,]+)\s*(Mln|Mld|Md|Mrd|K)?', s or "")
+    if not m: return None
+    try: v=float(m.group(1).replace('.','').replace(',','.'))
+    except: return None
+    u=(m.group(2) or '').lower()
+    if u=='mln': v*=1_000_000
+    elif u in ('mld','md','mrd'): v*=1_000_000_000
+    elif u=='k': v*=1000
+    return round(v)
+def parse_report(pdf_bytes):
+    with tempfile.NamedTemporaryFile(suffix=".pdf",delete=False) as f: f.write(pdf_bytes); path=f.name
+    try: t=subprocess.run(["pdftotext","-layout",path,"-"],capture_output=True,text=True).stdout
+    finally:
+        try: os.unlink(path)
+        except: pass
+    lines=[l.rstrip() for l in t.splitlines()]; j="\n".join(lines); out={}
+    m=re.search(r'Valutazione complessiva\s*\n\s*([A-D][+-]?)\s*\n', j); out["rating"]=m.group(1) if m else None
+    m=re.search(r'(\d{1,3})\s*/\s*100', j); out["punteggio"]=int(m.group(1)) if m else None
+    m=re.search(r'Limite di credito\s*\n\s*€\s*([\d.,]+\s*(?:Mln|Mld|Md|K)?)', j) or re.search(r'Limite di credito\s*€\s*([\d.,]+\s*(?:Mln|Mld|Md|K)?)', j)
+    out["limite"]=val_eur(m.group(1)) if m else None
+    m=re.search(r'Fatturato Stimato\s*\n?\s*€\s*([\d.,]+\s*(?:Mln|Mld|Md|K)?)', j); out["fatt_stim"]=val_eur(m.group(1)) if m else None
+    prop=None
+    for l in lines:
+        mm=re.search(r'(?:A\.U\.|AMMINISTRATORE UNICO|PRESIDENTE[^A-Z]*|Pres\.?\s*CdA|LEGALE RAPPRESENTANTE)\s{2,}([A-ZÀ-Ù][A-ZÀ-Ù \.&\']{3,})\s*$', l)
+        if mm: prop=mm.group(1).strip(); break
+    out["prop"]=prop
+    bad=[]
+    if "PRESENZA DI PROTESTI" in j: bad.append("protesti")
+    if "PRESENZA DI PREGIUDIZIEVOLI" in j: bad.append("pregiudizievoli")
+    if "PRESENZA DI PROCEDURE" in j: bad.append("procedure")
+    out["segnalazioni"]=("PRESENTI: "+", ".join(bad)) if bad else "nessuna"
+    return out
+def master_index(xlsx_bytes):
+    wb=openpyxl.load_workbook(io.BytesIO(xlsx_bytes),read_only=True,data_only=True)
+    M=wb["Anagrafica_Master"]; H=[c.value for c in M[1]]; HX={h:i for i,h in enumerate(H) if h}
+    rows={}
+    for ri,row in enumerate(M.iter_rows(min_row=2,values_only=True),2):
+        c=row[HX["Codice"]] if "Codice" in HX else None
+        if c: rows[str(c).strip()]=ri
+    wb.close(); return HX, rows
+def apply_master_credit(xlsx_bytes, updates):
+    z=zipfile.ZipFile(io.BytesIO(xlsx_bytes)); parts={n:z.read(n) for n in z.namelist()}; infos=z.infolist(); z.close()
+    wbx=parts['xl/workbook.xml'].decode()
+    rid=re.search(r'<sheet name="Anagrafica_Master"[^>]*r:id="(rId\d+)"',wbx).group(1)
+    tgt=re.search(r'Id="%s"[^>]*Target="([^"]*)"'%rid,parts['xl/_rels/workbook.xml.rels'].decode()).group(1)
+    sf="xl/"+tgt.replace("\\","/"); s=parts[sf].decode()
+    def esc(v): return str(v).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+    def cidx(l):
+        n=0
+        for ch in l: n=n*26+(ord(ch)-64)
+        return n
+    def cx(ref,val,isnum): return f'<c r="{ref}"><v>{val}</v></c>' if isnum else f'<c r="{ref}" t="inlineStr"><is><t>{esc(val)}</t></is></c>'
+    for rn,ups in updates.items():
+        m=re.search(r'(<row r="%d"[^>]*>)(.*?)(</row>)'%rn,s,re.DOTALL)
+        if not m: continue
+        nodes=re.findall(r'<c r="[A-Z]+%d"[^>]*?(?:/>|>.*?</c>)'%rn,m.group(2),re.DOTALL)
+        cm={re.match(r'<c r="([A-Z]+)\d+"',nd).group(1):nd for nd in nodes}
+        for col,val,isnum in ups: cm[col]=cx(f"{col}{rn}",val,isnum)
+        s=s[:m.start()]+m.group(1)+"".join(cm[c] for c in sorted(cm,key=cidx))+m.group(3)+s[m.end():]
+    parts[sf]=s.encode()
+    parts['xl/workbook.xml']=re.sub(r'(<calcPr[^/]*?)(/>)',lambda mm:mm.group(1)+(' fullCalcOnLoad="1"' if 'fullCalcOnLoad' not in mm.group(1) else '')+mm.group(2),wbx,count=1).encode()
+    if 'xl/calcChain.xml' in parts:
+        parts.pop('xl/calcChain.xml',None); infos=[i for i in infos if i.filename!='xl/calcChain.xml']
+        parts['[Content_Types].xml']=re.sub(r'<Override PartName="/xl/calcChain.xml"[^>]*/>','',parts['[Content_Types].xml'].decode()).encode()
+        parts['xl/_rels/workbook.xml.rels']=re.sub(r'<Relationship[^>]*Target="calcChain.xml"[^>]*/>','',parts['xl/_rels/workbook.xml.rels'].decode()).encode()
+    out=io.BytesIO()
+    with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as zw:
+        for i in infos: zw.writestr(i,parts[i.filename])
+    return out.getvalue()
 
 def main():
     t=tok(); mkdir(t,CARIC)
@@ -128,6 +210,24 @@ def main():
             if not op.get("uscite_mensili"): op["uscite_mensili"]=parse_uscite(dl(t,e["path_lower"])); changed=True
     if changed:
         ul(t,OPERATIVA,json.dumps(op,ensure_ascii=False).encode("utf-8")); print("operativa.json aggiornato.")
+    # BILANCI: aggiornano i campi credito del cliente nel database (Master) -> si propagano alle schede
+    bil=[e for e in files if classify(e["name"])=="bilancio"]
+    if bil:
+        xlsx=dl(t,DBX)
+        if not xlsx:
+            print("   ATTENZIONE: crm-database.xlsx non trovato: bilanci non applicati.")
+        else:
+            HX,rows=master_index(xlsx); updates={}
+            for e in bil:
+                cod=code_from_name(e["name"])
+                if not cod or cod not in rows: print(f"   bilancio ignorato (cliente non trovato): {e['name']}"); continue
+                rep=parse_report(dl(t,e["path_lower"])); ups=[]
+                for col,key,isnum in CREDIT:
+                    v=rep.get(key)
+                    if col in HX and v not in (None,""): ups.append((colletter(HX[col]),v,isnum))
+                if ups: updates[rows[cod]]=ups; print(f"   bilancio {cod}: {len(ups)} campi credito")
+            if updates:
+                ul(t,DBX,apply_master_credit(xlsx,updates)); print(f"crm-database.xlsx aggiornato: credito di {len(updates)} clienti.")
     day=datetime.date.today().isoformat()
     for e in files:
         r=move(t,e["path_lower"],f"{CARIC}/archivio/{day}/{e['name']}")
