@@ -158,6 +158,7 @@
   </header>
   <nav class="tabs">
     <button data-tab="clienti" class="on">Clienti</button>
+    <button data-tab="fornitori">Fornitori</button>
     <button data-tab="dash">Dashboard</button>
   </nav>
 
@@ -173,6 +174,15 @@
     <div class="count" id="count"></div>
     <div class="grid" id="grid"></div>
     <div class="empty hidden" id="empty">Nessun cliente corrisponde ai filtri.</div>
+  </section>
+
+  <section id="tab-fornitori" class="hidden">
+    <div style="padding:12px 16px 0"><button id="btnNuovoForn" class="savepill">+ Nuovo fornitore</button></div>
+    <div class="bar"><input type="search" id="qf" placeholder="Cerca fornitore, paese, materiale, referente…">
+      <select id="fTipoF"><option value="">Tutti i tipi</option></select></div>
+    <div class="count" id="countF"></div>
+    <div class="grid" id="gridF"></div>
+    <div class="empty hidden" id="emptyF">Nessun fornitore. Premi "+ Nuovo fornitore" per aggiungerne uno.</div>
   </section>
 
   <section id="tab-dash" class="hidden">
@@ -220,7 +230,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "11";
+const APP_VERSION = "12";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -233,6 +243,7 @@ let DATA = [];
 let VEND = {mensili:[],totali:{}};
 let OPER = {};
 let INTER = {};
+let FORN = {};
 let TIPO = "", PRESET = null, charts = {};
 
 function esc(s){return (s==null?"":String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -266,6 +277,7 @@ async function loadData(){
   VEND = snap.vendite || {mensili:[],totali:{}};
   OPER = snap.operativa || {};
   INTER = j.interazioni || {};
+  FORN = j.fornitori || {};
   const byCode={}; (snap.clienti||[]).forEach(c=>{ byCode[c.codice]=Object.assign({},c); });
   // nuovi clienti creati dall'app e non ancora nel database
   (j.nuovi||[]).forEach(n=>{ if(n&&n.codice&&!byCode[n.codice]) byCode[n.codice]=Object.assign({status:"Prospect",stato_attivita:"Da fare"},n.fields||{}); });
@@ -438,6 +450,81 @@ async function saveNuovo(){
   btn.disabled=false; btn.textContent="Crea cliente";
 }
 document.getElementById('btnNuovo').onclick=openNuovo;
+
+// ---------- FORNITORI ----------
+const TIPI_FORN=["Produttore","Trader","Spedizioniere","Agente","Altro"];
+function fornList(){ return Object.values(FORN||{}); }
+function renderForn(){
+  const q=(document.getElementById('qf').value||'').toLowerCase();
+  const ft=document.getElementById('fTipoF').value;
+  const g=document.getElementById('gridF'); g.innerHTML=""; let n=0;
+  fornList().filter(f=>{
+    if(ft&&f.tipo!==ft) return false;
+    if(q){const b=((f.ragione||"")+" "+(f.paese||"")+" "+(f.materiali||"")+" "+(f.referente||"")+" "+(f.codice||"")).toLowerCase(); if(!b.includes(q)) return false;}
+    return true;
+  }).sort((a,b)=>String(a.ragione||'').localeCompare(String(b.ragione||''))).forEach(f=>{
+    n++; const d=document.createElement('div'); d.className="card"; d.onclick=()=>openForn(f.codice);
+    d.innerHTML=`<div class="top"><div><div class="rag">${esc(f.ragione)}</div>
+        <div class="meta">${esc(f.codice||'')}${f.paese?' · '+esc(f.paese):''}</div></div>
+        ${f.tipo?`<span class="tag t-prospect">${esc(f.tipo)}</span>`:''}</div>
+      ${f.materiali?`<div class="row"><b>Materiali:</b> ${esc(f.materiali)}</div>`:''}
+      ${f.referente?`<div class="row"><b>Referente:</b> ${esc(f.referente)}</div>`:''}`;
+    g.appendChild(d);
+  });
+  document.getElementById('countF').textContent=`${n} fornitori`;
+  document.getElementById('emptyF').classList.toggle('hidden', n>0);
+  fillSelect('fTipoF',fornList().map(f=>f.tipo));
+}
+function openForn(codice){
+  const f=(codice&&FORN[codice])?FORN[codice]:{};
+  const isNew=!codice;
+  const d=document.getElementById('drawer'); CURRENT=null;
+  const inp=(id,label,val,type)=>`<label class="fl">${label}</label><input class="fi" id="fo_${id}" type="${type||'text'}" value="${escAttr(val)}">`;
+  const sel=(id,label,val,opts)=>`<label class="fl">${label}</label><select class="fi" id="fo_${id}">${["",...opts].map(o=>`<option${o===(val||"")?" selected":""}>${esc(o)}</option>`).join("")}</select>`;
+  d.innerHTML=`<div class="dh"><button class="close" onclick="closeDrawer()">×</button>
+      <h2>${isNew?'Nuovo fornitore':esc(f.ragione)}</h2>
+      <div class="sub">${isNew?'Compila e salva':esc(f.codice||'')}</div></div>
+    <div class="sec"><h3>Anagrafica</h3>
+      ${inp("ragione","Ragione sociale *",f.ragione)}
+      ${isNew?inp("codice","Codice (vuoto = generato)",""):''}
+      ${sel("tipo","Tipo",f.tipo,TIPI_FORN)}
+      ${inp("materiali","Materiali / prodotti",f.materiali)}
+      ${inp("paese","Paese",f.paese)}
+      ${inp("piva","P.IVA / VAT",f.piva)}
+      ${inp("sito","Sito web",f.sito)}
+    </div>
+    <div class="sec"><h3>Contatti</h3>
+      ${inp("referente","Referente",f.referente)}${inp("email","Email",f.email)}${inp("telefono","Telefono",f.telefono)}
+    </div>
+    <div class="sec"><h3>Condizioni</h3>
+      ${inp("incoterms","Incoterms",f.incoterms)}${inp("pagamento","Pagamento",f.pagamento)}${inp("valuta","Valuta",f.valuta)}
+    </div>
+    <div class="sec"><h3>Note</h3><textarea class="fi" id="fo_note" rows="4">${esc(f.note||"")}</textarea></div>
+    ${!isNew?`<div class="sec"><span class="muted" style="font-size:12px;color:var(--mid)">Creato da ${esc(f.creatoDa||'—')} · ultima modifica ${esc(f.modificatoDa||'—')}</span></div>`:''}
+    <div class="savebar"><button id="foBtn">${isNew?'Crea fornitore':'Salva modifiche'}</button>
+      ${!isNew?`<button class="cancelpill" onclick="delForn('${esc(f.codice)}')">Elimina</button>`:''}
+      <span id="foMsg"></span></div>`;
+  document.getElementById('foBtn').onclick=()=>saveForn(codice);
+  d.classList.add('open'); document.getElementById('ov').classList.add('open');
+}
+async function saveForn(codice){
+  const ids=["ragione","codice","tipo","materiali","paese","piva","sito","referente","email","telefono","incoterms","pagamento","valuta","note"];
+  const fields={}; ids.forEach(id=>{const el=document.getElementById('fo_'+id); if(el) fields[id]=el.value.trim();});
+  const btn=document.getElementById('foBtn'), msg=document.getElementById('foMsg');
+  if(!fields.ragione){ msg.textContent="La ragione sociale è obbligatoria."; return; }
+  btn.disabled=true; btn.textContent="Salvataggio…"; msg.textContent="";
+  const {ok,j}=await apiPost('/fornitore',{codice:codice||fields.codice||"",fields});
+  if(ok&&j.codice){ FORN[j.codice]=j.fornitore; msg.textContent="Salvato ✓"; renderForn(); setTimeout(closeDrawer,900); }
+  else msg.textContent=(j&&j.error)||"Errore nel salvataggio.";
+  btn.disabled=false; btn.textContent=codice?'Salva modifiche':'Crea fornitore';
+}
+async function delForn(codice){
+  if(!confirm('Eliminare questo fornitore?')) return;
+  const {ok}=await apiPost('/fornitore-delete',{codice});
+  if(ok){ delete FORN[codice]; closeDrawer(); renderForn(); } else alert("Errore nell'eliminazione.");
+}
+document.getElementById('btnNuovoForn').onclick=()=>openForn(null);
+['qf','fTipoF'].forEach(id=>document.getElementById(id).addEventListener('input',renderForn));
 async function apiPost(path,body){
   const r=await fetch(API+path,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+TOKEN},body:JSON.stringify(body)});
   let j={}; try{ j=await r.json(); }catch(e){}
@@ -481,8 +568,10 @@ document.getElementById('ov').onclick=closeDrawer;
 document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('on',x===b));
   document.getElementById('tab-clienti').classList.toggle('hidden', b.dataset.tab!=='clienti');
+  document.getElementById('tab-fornitori').classList.toggle('hidden', b.dataset.tab!=='fornitori');
   document.getElementById('tab-dash').classList.toggle('hidden', b.dataset.tab!=='dash');
   if(b.dataset.tab==='dash') renderDash();
+  if(b.dataset.tab==='fornitori') renderForn();
 });
 // sotto-tab dashboard
 document.querySelectorAll('.dsub button').forEach(b=>b.onclick=()=>{
@@ -640,6 +729,7 @@ async function start(){
   fillSelect('fProv',DATA.map(c=>c.provincia));
   renderPStrip();
   render();
+  renderForn();
 }
 
 // avvio: se ho un token valido, entro; altrimenti login
