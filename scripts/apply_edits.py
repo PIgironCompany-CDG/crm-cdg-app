@@ -32,7 +32,15 @@ ROUTE = {
  "email":("MAS","Email","str"), "telefono":("MAS","Telefono","str"),
  "tipologia":("MAS","Tipologia","str"), "priorita":("MAS","Priorità","str"),
  "stato_attivita":("MAS","Stato attività","str"),
+ # anagrafica (Fase C: campi prima in sola lettura, ora modificabili dall'app)
+ "ragione":("MAS","Ragione sociale","str"), "piva":("MAS","P.IVA","str"),
+ "settore":("MAS","Settore","str"), "proprieta":("MAS","Proprietà","str"),
+ "indirizzo":("MAS","Indirizzo","str"), "comune":("MAS","Comune","str"),
+ "provincia":("MAS","Provincia","str"), "regione":("MAS","Regione","str"),
+ "owner":("MAS","Owner","str"),
 }
+NEW_PATH = "/nuovi.jsonl"
+NEW_ARCHIVE = "/nuovi-applied.jsonl"
 
 def tok():
     r=requests.post(TOKEN_URL,data={"grant_type":"refresh_token","refresh_token":REFRESH,"client_id":APP_KEY},timeout=30)
@@ -136,38 +144,116 @@ def apply_to_xlsx(xlsx_bytes, agg):
         for i in infos: zw.writestr(i,parts[i.filename])
     return out.getvalue()
 
+def add_clients(xlsx_bytes, nuovi):
+    """Aggiunge nuove righe cliente in Anagrafica_Master (chirurgia XML)."""
+    wb=openpyxl.load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
+    M=wb["Anagrafica_Master"]; H=[c.value for c in M[1]]; HX={h:i for i,h in enumerate(H) if h}
+    esistenti=set(); last=1
+    for ri,row in enumerate(M.iter_rows(min_row=2,values_only=True),2):
+        c=row[HX["Codice"]] if "Codice" in HX else None
+        if c: esistenti.add(str(c).strip()); last=ri
+    wb.close()
+    da_agg=[n for n in nuovi if str(n.get("codice","")).strip() and str(n["codice"]).strip() not in esistenti]
+    if not da_agg: return xlsx_bytes, 0
+
+    z=zipfile.ZipFile(io.BytesIO(xlsx_bytes)); parts={n:z.read(n) for n in z.namelist()}; infos=z.infolist(); z.close()
+    wbx=parts['xl/workbook.xml'].decode()
+    rid=re.search(r'<sheet name="Anagrafica_Master"[^>]*r:id="(rId\d+)"',wbx).group(1)
+    tgt=re.search(r'Id="%s"[^>]*Target="([^"]*)"'%rid,parts['xl/_rels/workbook.xml.rels'].decode()).group(1)
+    sf="xl/"+tgt.replace("\\","/"); s=parts[sf].decode()
+    tabfile=next((n for n in parts if n.startswith("xl/tables/") and b'name="tbl_Master"' in parts[n]),None)
+
+    # mappa campo app -> intestazione Master (solo destinazioni MAS)
+    field2col={k:v[1] for k,v in ROUTE.items() if v[0]=="MAS"}
+    maxcol=max(HX.values())+1
+    rows_xml=[]; r=last+1
+    for n in da_agg:
+        f=n.get("fields",{}) or {}; cells={}
+        def put(colname,val):
+            if colname in HX and val not in (None,""):
+                cells[colletter(HX[colname])]=strcell_plain(f"{colletter(HX[colname])}{r}",val)
+        put("Codice", n["codice"])
+        for k,v in f.items():
+            if k in field2col: put(field2col[k], v)
+        put("Status","Prospect"); put("Stato attività","Da fare")
+        if cells:
+            rows_xml.append(f'<row r="{r}" spans="1:{maxcol}">'+"".join(cells[c] for c in sorted(cells,key=colidx))+'</row>')
+            r+=1
+    newlast=r-1
+    s=s.replace('</sheetData>',"".join(rows_xml)+'</sheetData>',1)
+    s=re.sub(r'<dimension ref="A1:[A-Z]+\d+"/>',f'<dimension ref="A1:{colletter(maxcol-1)}{newlast}"/>',s)
+    parts[sf]=s.encode()
+    if tabfile:
+        tx=parts[tabfile].decode()
+        m=re.search(r'ref="A1:([A-Z]+)(\d+)"',tx)
+        if m: tx=tx.replace(f'ref="A1:{m.group(1)}{m.group(2)}"',f'ref="A1:{m.group(1)}{newlast}"')
+        parts[tabfile]=tx.encode()
+    parts['xl/workbook.xml']=re.sub(r'(<calcPr[^/]*?)(/>)',lambda mm:mm.group(1)+(' fullCalcOnLoad="1"' if 'fullCalcOnLoad' not in mm.group(1) else '')+mm.group(2),wbx,count=1).encode()
+    if 'xl/calcChain.xml' in parts:
+        parts.pop('xl/calcChain.xml',None); infos=[i for i in infos if i.filename!='xl/calcChain.xml']
+        parts['[Content_Types].xml']=re.sub(r'<Override PartName="/xl/calcChain.xml"[^>]*/>','',parts['[Content_Types].xml'].decode()).encode()
+        parts['xl/_rels/workbook.xml.rels']=re.sub(r'<Relationship[^>]*Target="calcChain.xml"[^>]*/>','',parts['xl/_rels/workbook.xml.rels'].decode()).encode()
+    out=io.BytesIO()
+    with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as zw:
+        for i in infos: zw.writestr(i,parts[i.filename])
+    return out.getvalue(), len(rows_xml)
+
+def strcell_plain(ref,val):
+    return f'<c r="{ref}" t="inlineStr"><is><t>{esc(val)}</t></is></c>'
+
 def main():
     t=tok()
+    # ---- 1. NUOVI CLIENTI creati dall'app ----
+    newRaw=dl_bytes(t,NEW_PATH)
+    newlines=[l for l in (newRaw.decode("utf-8").splitlines() if newRaw else []) if l.strip()]
+    nuovi=[]
+    for l in newlines:
+        try: nuovi.append(json.loads(l))
+        except: pass
+    # ---- 2. MODIFICHE in coda ----
     editsRaw=dl_bytes(t,EDITS_PATH)
     lines=[l for l in (editsRaw.decode("utf-8").splitlines() if editsRaw else []) if l.strip()]
-    if not lines:
-        print("Nessuna modifica in coda."); return 0
-    n=len(lines)
     edits=[]
     for l in lines:
         try: edits.append(json.loads(l))
         except: pass
-    # aggrega per codice in ordine cronologico (le successive prevalgono)
+    if not lines and not newlines:
+        print("Nessuna modifica né nuovo cliente in coda."); return 0
+    n=len(lines)
     agg={}
     for e in edits:
         cod=str(e.get("codice","")).strip()
         if not cod: continue
         agg.setdefault(cod,{}).update(e.get("fields",{}) or {})
-    print(f"Modifiche da applicare: {len(agg)} clienti, {n} eventi.")
+    print(f"In coda: {len(nuovi)} nuovi clienti, {len(agg)} clienti modificati ({n} eventi).")
 
     xlsx=dl_bytes(t,DB_PATH)
     if not xlsx: print("ERRORE: database non trovato su Dropbox."); return 1
-    new_xlsx=apply_to_xlsx(xlsx,agg)
-    ul_bytes(t,DB_PATH,new_xlsx)
+
+    added=0
+    if nuovi:
+        xlsx,added=add_clients(xlsx,nuovi)
+        print(f"Nuovi clienti inseriti nel Master: {added}")
+    if agg:
+        xlsx=apply_to_xlsx(xlsx,agg)
+    ul_bytes(t,DB_PATH,xlsx)
     print("Database aggiornato su Dropbox.")
 
-    # archivia gli applicati e rimuovi solo le prime n righe (preserva eventuali nuove aggiunte nel frattempo)
-    prevArch=dl_bytes(t,ARCHIVE_PATH); prevArch=prevArch.decode("utf-8") if prevArch else ""
-    ul_bytes(t,ARCHIVE_PATH,(prevArch+"\n".join(lines)+"\n").encode("utf-8"))
-    curRaw=dl_bytes(t,EDITS_PATH); cur=[l for l in (curRaw.decode("utf-8").splitlines() if curRaw else []) if l.strip()]
-    remainder=cur[n:] if len(cur)>n else []
-    ul_bytes(t,EDITS_PATH,("\n".join(remainder)+("\n" if remainder else "")).encode("utf-8"))
-    print(f"Coda ripulita ({len(remainder)} in attesa).")
+    # archivio + pulizia code
+    if lines:
+        prevArch=dl_bytes(t,ARCHIVE_PATH); prevArch=prevArch.decode("utf-8") if prevArch else ""
+        ul_bytes(t,ARCHIVE_PATH,(prevArch+"\n".join(lines)+"\n").encode("utf-8"))
+        curRaw=dl_bytes(t,EDITS_PATH); cur=[l for l in (curRaw.decode("utf-8").splitlines() if curRaw else []) if l.strip()]
+        remainder=cur[n:] if len(cur)>n else []
+        ul_bytes(t,EDITS_PATH,("\n".join(remainder)+("\n" if remainder else "")).encode("utf-8"))
+        print(f"Coda modifiche ripulita ({len(remainder)} in attesa).")
+    if newlines and added:
+        prevN=dl_bytes(t,NEW_ARCHIVE); prevN=prevN.decode("utf-8") if prevN else ""
+        ul_bytes(t,NEW_ARCHIVE,(prevN+"\n".join(newlines)+"\n").encode("utf-8"))
+        curN=dl_bytes(t,NEW_PATH); curl=[l for l in (curN.decode("utf-8").splitlines() if curN else []) if l.strip()]
+        rem=curl[len(newlines):] if len(curl)>len(newlines) else []
+        ul_bytes(t,NEW_PATH,("\n".join(rem)+("\n" if rem else "")).encode("utf-8"))
+        print(f"Coda nuovi clienti ripulita ({len(rem)} in attesa).")
     return 0
 
 if __name__=="__main__":

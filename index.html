@@ -163,6 +163,7 @@
 
   <section id="tab-clienti">
     <div class="pstrip" id="pstrip"></div>
+    <div style="padding:10px 16px 0"><button id="btnNuovo" class="savepill">+ Nuovo cliente</button></div>
     <div class="bar">
       <input type="search" id="q" placeholder="Cerca ragione sociale, comune, referente…">
       <select id="fSettore"><option value="">Tutti i settori</option></select>
@@ -219,7 +220,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "10";
+const APP_VERSION = "11";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -266,6 +267,8 @@ async function loadData(){
   OPER = snap.operativa || {};
   INTER = j.interazioni || {};
   const byCode={}; (snap.clienti||[]).forEach(c=>{ byCode[c.codice]=Object.assign({},c); });
+  // nuovi clienti creati dall'app e non ancora nel database
+  (j.nuovi||[]).forEach(n=>{ if(n&&n.codice&&!byCode[n.codice]) byCode[n.codice]=Object.assign({status:"Prospect",stato_attivita:"Da fare"},n.fields||{}); });
   // overlay: applica le modifiche in coda (edits) sopra lo snapshot
   (j.edits||[]).forEach(ed=>{ if(ed && ed.codice && byCode[ed.codice]) Object.assign(byCode[ed.codice], ed.fields||{}); });
   DATA=Object.values(byCode);
@@ -312,11 +315,19 @@ function openDrawer(c){
     return `<label class="fl">${label}</label><select class="fi" id="ed_${id}">${o}</select>`;};
   d.innerHTML=`<div class="dh"><button class="close" onclick="closeDrawer()">×</button>
       <h2>${esc(c.ragione)}</h2><div class="sub">${esc(c.codice)} · ${esc(c.settore)} · ${esc(c.provincia)}</div></div>
-    <div class="sec"><h3>Contatti</h3>
+    <div class="sec"><h3>Anagrafica e contatti</h3>
+      ${inp("ragione","Ragione sociale",c.ragione)}
+      ${inp("piva","P.IVA",c.piva)}
+      ${sel("settore","Settore",c.settore,["Fonderia","Acciaieria","Trading"])}
       ${inp("referente","Referente acquisti",c.referente)}
       ${inp("email","Email",c.email)}
       ${inp("telefono","Telefono",c.telefono)}
-      <div class="kv" style="margin-top:10px">${ro("Proprietà",c.proprieta)}${ro("Comune",c.comune)}${ro("Indirizzo",c.indirizzo)}</div>
+      ${inp("proprieta","Proprietà",c.proprieta)}
+      ${inp("indirizzo","Indirizzo",c.indirizzo)}
+      ${inp("comune","Comune",c.comune)}
+      ${inp("provincia","Provincia",c.provincia)}
+      ${inp("regione","Regione",c.regione)}
+      ${inp("owner","Owner",c.owner)}
     </div>
     <div class="sec"><h3>Stato commerciale</h3>
       ${sel("tipologia","Tipologia",c.tipologia,["Cliente caldo","Cliente raffreddamento","Cliente fermo","Ex-cliente storico","Prospect nuovo"])}
@@ -345,7 +356,8 @@ function openDrawer(c){
 }
 async function saveEdit(){
   if(!CURRENT) return;
-  const ids=["referente","email","telefono","tipologia","priorita","stato_attivita","prossima_azione","data_followup","stato_followup"];
+  const ids=["ragione","piva","settore","referente","email","telefono","proprieta","indirizzo","comune","provincia","regione","owner",
+             "tipologia","priorita","stato_attivita","prossima_azione","data_followup","stato_followup"];
   const btn=document.getElementById('saveBtn'), msg=document.getElementById('saveMsg');
   // Anti-sovrascrittura: invio SOLO i campi effettivamente cambiati (non tutti)
   const fields={};
@@ -381,6 +393,51 @@ function renderInter(cod){
   });
 }
 function showAdd(tp){ const b=document.getElementById('addbox-'+tp); if(b) b.classList.toggle('hidden'); }
+
+// ---------- NUOVO CLIENTE ----------
+function openNuovo(){
+  const d=document.getElementById('drawer'); CURRENT=null;
+  const inp=(id,label,type)=>`<label class="fl">${label}</label><input class="fi" id="nc_${id}" type="${type||'text'}">`;
+  const sel=(id,label,opts)=>`<label class="fl">${label}</label><select class="fi" id="nc_${id}">${["",...opts].map(o=>`<option>${esc(o)}</option>`).join("")}</select>`;
+  d.innerHTML=`<div class="dh"><button class="close" onclick="closeDrawer()">×</button>
+      <h2>Nuovo cliente</h2><div class="sub">Compila i dati e salva: verrà aggiunto al database</div></div>
+    <div class="sec"><h3>Anagrafica</h3>
+      ${inp("ragione","Ragione sociale *")}
+      ${inp("codice","Codice (lascia vuoto per generarlo)")}
+      ${inp("piva","P.IVA")}
+      ${sel("settore","Settore",["Fonderia","Acciaieria","Trading"])}
+      ${sel("tipologia","Tipologia",TIPI)}
+      ${sel("priorita","Priorità",["Alta","Media","Bassa"])}
+    </div>
+    <div class="sec"><h3>Contatti</h3>
+      ${inp("referente","Referente acquisti")}${inp("email","Email")}${inp("telefono","Telefono")}
+      ${inp("proprieta","Proprietà")}${inp("indirizzo","Indirizzo")}${inp("comune","Comune")}
+      ${inp("provincia","Provincia")}${inp("regione","Regione")}${inp("owner","Owner")}
+    </div>
+    <div class="sec"><h3>Prima azione</h3>
+      ${inp("prossima_azione","Prossima azione")}${inp("data_followup","Data follow-up","date")}
+      <label class="fl">Note</label><textarea class="fi" id="nc_note" rows="3"></textarea>
+    </div>
+    <div class="savebar"><button id="ncBtn">Crea cliente</button><span id="ncMsg"></span></div>`;
+  document.getElementById('ncBtn').onclick=saveNuovo;
+  d.classList.add('open'); document.getElementById('ov').classList.add('open');
+}
+async function saveNuovo(){
+  const ids=["ragione","codice","piva","settore","tipologia","priorita","referente","email","telefono",
+             "proprieta","indirizzo","comune","provincia","regione","owner","prossima_azione","data_followup","note"];
+  const fields={}; ids.forEach(id=>{const el=document.getElementById('nc_'+id); if(el&&el.value.trim()) fields[id]=el.value.trim();});
+  const btn=document.getElementById('ncBtn'), msg=document.getElementById('ncMsg');
+  if(!fields.ragione){ msg.textContent="La ragione sociale è obbligatoria."; return; }
+  btn.disabled=true; btn.textContent="Creazione…"; msg.textContent="";
+  const {ok,j}=await apiPost('/nuovo-cliente',{fields});
+  if(ok&&j.entry){
+    DATA.push(Object.assign({status:"Prospect",stato_attivita:"Da fare"},j.entry.fields));
+    msg.textContent="Creato ✓ (nel database entro pochi minuti)";
+    renderPStrip(); render(); setTimeout(closeDrawer,1200);
+  } else msg.textContent=(j&&j.error)||"Errore nella creazione.";
+  btn.disabled=false; btn.textContent="Crea cliente";
+}
+document.getElementById('btnNuovo').onclick=openNuovo;
 async function apiPost(path,body){
   const r=await fetch(API+path,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+TOKEN},body:JSON.stringify(body)});
   let j={}; try{ j=await r.json(); }catch(e){}
