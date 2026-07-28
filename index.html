@@ -219,7 +219,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "9";
+const APP_VERSION = "10";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -336,7 +336,8 @@ function openDrawer(c){
     </div>
     <div class="sec"><h3>Salute aziendale (sola lettura)</h3><div class="kv">
       ${ro("Ultimo bilancio",c.anno_bilancio)}${ro("Fatturato bilancio",c.fatturato_bilancio)}${ro("Utile/Perdita",c.utile)}
-      ${ro("Dipendenti",c.dipendenti)}${ro("Rating",c.rating)}${ro("Punteggio",c.punteggio)}${ro("Limite credito",c.limite_credito)}</div></div>
+      ${ro("Dipendenti",c.dipendenti)}${ro("Rating",c.rating)}${ro("Punteggio",c.punteggio)}${ro("Limite credito",c.limite_credito)}
+      ${ro("Esposizione corrente", (c.esposizione!=null&&c.esposizione!=='')?euro(c.esposizione):'—')}</div></div>
     <div class="savebar"><button id="saveBtn">Salva modifiche</button><span id="saveMsg"></span></div>`;
   document.getElementById('saveBtn').onclick=saveEdit;
   renderInter(c.codice);

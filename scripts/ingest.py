@@ -108,7 +108,10 @@ def parse_uscite(b):
 
 def classify(name):
     u=name.upper()
-    if u.endswith(".PDF") and re.match(r'[A-Z]{2,4}\d{3}', u): return "bilancio"   # CODICE - Ragione.pdf
+    if u.endswith(".PDF"):
+        if "DETTAGLIO" in u: return "dettaglio"                       # DETTAGLIO ... .pdf (ordini + esposizione per cliente)
+        if re.match(r'[A-Z]{2,4}\d{3}', u): return "bilancio"         # CODICE - Ragione.pdf
+        return "altro"
     if u.endswith(".XLSX"):
         if "ESPOSIZIONE" in u: return "esposizione"
         if "MAGAZZINO" in u or "INVENDUTO" in u: return "magazzino"
@@ -193,6 +196,117 @@ def apply_master_credit(xlsx_bytes, updates):
         for i in infos: zw.writestr(i,parts[i.filename])
     return out.getvalue()
 
+# ---------- DETTAGLIO (ordini aperti + esposizione per cliente) ----------
+def money(s):
+    s=str(s).strip().replace('.','').replace(',','.')
+    try: return round(float(s),2)
+    except: return None
+def parse_dettaglio(pdf_bytes):
+    with tempfile.NamedTemporaryFile(suffix=".pdf",delete=False) as f: f.write(pdf_bytes); path=f.name
+    try: t=subprocess.run(["pdftotext","-layout",path,"-"],capture_output=True,text=True).stdout
+    finally:
+        try: os.unlink(path)
+        except: pass
+    cur=None; section=None; espos={}; ordini={}
+    EPOCH=datetime.date(1899,12,30)
+    for ln in t.splitlines():
+        m=re.search(r'Cliente\s+([A-Z]{2,4}\d{3})\s+', ln)
+        if m: cur=m.group(1)
+        if "Movimenti Contabili" in ln: section="contabili"
+        elif "Movimenti Contratti-Ordini" in ln: section="ordini"
+        elif "Movimenti Pre-Fatture" in ln: section="pre"
+        me=re.search(r'Totali senza Eff\.\s+([\d.,]+)', ln)
+        if me and cur: espos[cur]=money(me.group(1))
+        if section=="ordini" and cur:
+            mo=re.search(r'\b(\d{2}/G\d{3,4})\b', ln)
+            if mo:
+                doc=mo.group(1); toks=ln.split()
+                decs=[i for i,tk in enumerate(toks) if re.match(r'^[\d.]+,\d{2}$',tk)]
+                imp=res=None
+                if decs:
+                    eur_i=decs[-2] if len(decs)>=2 else decs[-1]; imp=money(toks[eur_i])
+                    for k in range(eur_i-1,-1,-1):
+                        if re.match(r'^\d+$',toks[k]): res=int(toks[k]); break
+                ds=None; md=re.search(r'(\d{2}/\d{2}/\d{4})', ln)
+                if md:
+                    try: ds=(datetime.datetime.strptime(md.group(1),"%d/%m/%Y").date()-EPOCH).days
+                    except: ds=None
+                ordini[doc]={"cli":cur,"qty_kg":(res or 0)*1000,"imp":imp or 0,"data_serial":ds}
+    return espos,ordini
+
+def read_vendite_layout(xlsx_bytes):
+    wb=openpyxl.load_workbook(io.BytesIO(xlsx_bytes),read_only=True,data_only=True)
+    V=wb["Vendite"]; hdr=None; col={}
+    for ri,row in enumerate(V.iter_rows(min_row=1,max_row=40,values_only=True),1):
+        vals=[str(c).strip() if c is not None else "" for c in row]
+        if "Data" in vals and "Cod.Cli" in vals and "N. documento" in vals:
+            hdr=ri
+            for i,v in enumerate(vals,1):
+                if v: col[v]=i
+            break
+    docs=set(); last=hdr or 1
+    if hdr:
+        dcol=col["N. documento"]-1; ccol=col["Cod.Cli"]-1
+        for ri,row in enumerate(V.iter_rows(min_row=hdr+1,values_only=True),hdr+1):
+            d=row[dcol] if dcol<len(row) else None; c=row[ccol] if ccol<len(row) else None
+            if d not in (None,""): docs.add(str(d).strip())
+            if c not in (None,""): last=ri
+    wb.close(); return hdr,col,docs,last
+
+def add_orders(xlsx_bytes,new_orders,hdr,col,last):
+    z=zipfile.ZipFile(io.BytesIO(xlsx_bytes)); parts={n:z.read(n) for n in z.namelist()}; infos=z.infolist(); z.close()
+    wbx=parts['xl/workbook.xml'].decode()
+    rid=re.search(r'<sheet name="Vendite"[^>]*r:id="(rId\d+)"',wbx).group(1)
+    tgt=re.search(r'Id="%s"[^>]*Target="([^"]*)"'%rid,parts['xl/_rels/workbook.xml.rels'].decode()).group(1)
+    sf="xl/"+tgt.replace("\\","/"); s=parts[sf].decode()
+    tabfile=next((n for n in parts if n.startswith("xl/tables/") and b"tbl_Vendite" in parts[n]),None)
+    tx=parts[tabfile].decode(); L={n:colletter(i) for n,i in col.items()}; maxcol=max(col.values())
+    style_of={}
+    for name,idx in col.items():
+        letter=colletter(idx); m=re.search(r'<c r="%s%d"([^>]*?)(?:/>|>)'%(letter,last),s)
+        sm=re.search(r's="(\d+)"',m.group(1)) if m else None; style_of[name]=sm.group(1) if sm else None
+    FORMULAS={}
+    for chunk in tx.split('<tableColumn')[1:]:
+        nm=re.search(r'name="([^"]+)"',chunk); cf=re.search(r'<calculatedColumnFormula>(.*?)</calculatedColumnFormula>',chunk,re.DOTALL)
+        if nm and cf: FORMULAS[nm.group(1)]=cf.group(1)
+    if "Anno" in col: FORMULAS["Anno"]='IF(A{R}=&quot;&quot;,&quot;&quot;,YEAR(A{R}))'
+    def esc(v): return str(v).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+    def cell(name,r,value=None,isnum=False):
+        letter=L[name]; st=style_of.get(name); sa=f' s="{st}"' if st else ''
+        if name in FORMULAS: return f'<c r="{letter}{r}"{sa}><f>{FORMULAS[name].replace("{R}",str(r))}</f></c>'
+        if value in (None,""): return f'<c r="{letter}{r}"{sa}/>'
+        if isnum: return f'<c r="{letter}{r}"{sa}><v>{value}</v></c>'
+        return f'<c r="{letter}{r}"{sa} t="inlineStr"><is><t>{esc(value)}</t></is></c>'
+    rows_xml=[]; r=last+1
+    for doc in sorted(new_orders):
+        o=new_orders[doc]; cells=[]
+        for name,idx in sorted(col.items(),key=lambda kv:kv[1]):
+            if name=="Data": cells.append(cell(name,r,o["data_serial"],True) if o.get("data_serial") else cell(name,r))
+            elif name=="Cod.Cli": cells.append(cell(name,r,o["cli"]))
+            elif name=="N. documento": cells.append(cell(name,r,doc))
+            elif name=="Quantità (kg)": cells.append(cell(name,r,o["qty_kg"],True))
+            elif name=="Importo": cells.append(cell(name,r,o["imp"],True))
+            elif name=="Valuta": cells.append(cell(name,r,"EUR"))
+            elif name=="Stato": cells.append(cell(name,r,"Ordine"))
+            else: cells.append(cell(name,r))
+        rows_xml.append(f'<row r="{r}" spans="1:{maxcol}">'+"".join(cells)+'</row>'); r+=1
+    newlast=r-1
+    s=s.replace('</sheetData>',"".join(rows_xml)+'</sheetData>',1)
+    s=re.sub(r'<dimension ref="A1:[A-Z]+\d+"/>',f'<dimension ref="A1:{colletter(maxcol)}{newlast}"/>',s)
+    parts[sf]=s.encode()
+    oref=re.search(r'ref="A%d:([A-Z]+)%d"'%(hdr,last),tx)
+    if oref: tx=tx.replace('ref="A%d:%s%d"'%(hdr,oref.group(1),last),'ref="A%d:%s%d"'%(hdr,oref.group(1),newlast))
+    parts[tabfile]=tx.encode()
+    parts['xl/workbook.xml']=re.sub(r'(<calcPr[^/]*?)(/>)',lambda mm:mm.group(1)+(' fullCalcOnLoad="1"' if 'fullCalcOnLoad' not in mm.group(1) else '')+mm.group(2),wbx,count=1).encode()
+    if 'xl/calcChain.xml' in parts:
+        parts.pop('xl/calcChain.xml',None); infos=[i for i in infos if i.filename!='xl/calcChain.xml']
+        parts['[Content_Types].xml']=re.sub(r'<Override PartName="/xl/calcChain.xml"[^>]*/>','',parts['[Content_Types].xml'].decode()).encode()
+        parts['xl/_rels/workbook.xml.rels']=re.sub(r'<Relationship[^>]*Target="calcChain.xml"[^>]*/>','',parts['xl/_rels/workbook.xml.rels'].decode()).encode()
+    out=io.BytesIO()
+    with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as zw:
+        for i in infos: zw.writestr(i,parts[i.filename])
+    return out.getvalue(),newlast
+
 def main():
     t=tok(); mkdir(t,CARIC)
     files=listing(t,CARIC)
@@ -210,24 +324,39 @@ def main():
             if not op.get("uscite_mensili"): op["uscite_mensili"]=parse_uscite(dl(t,e["path_lower"])); changed=True
     if changed:
         ul(t,OPERATIVA,json.dumps(op,ensure_ascii=False).encode("utf-8")); print("operativa.json aggiornato.")
-    # BILANCI: aggiornano i campi credito del cliente nel database (Master) -> si propagano alle schede
+    # DATABASE: bilanci (credito) + DETTAGLIO (esposizione per cliente -> Master, ordini aperti -> Vendite)
     bil=[e for e in files if classify(e["name"])=="bilancio"]
-    if bil:
+    det=[e for e in files if classify(e["name"])=="dettaglio"]
+    if bil or det:
         xlsx=dl(t,DBX)
         if not xlsx:
-            print("   ATTENZIONE: crm-database.xlsx non trovato: bilanci non applicati.")
+            print("   ATTENZIONE: crm-database.xlsx non trovato: bilanci/dettaglio non applicati.")
         else:
-            HX,rows=master_index(xlsx); updates={}
+            HX,rows=master_index(xlsx); mupd={}
+            def addm(cod,colname,val,isnum):
+                if cod in rows and colname in HX and val not in (None,""):
+                    mupd.setdefault(rows[cod],[]).append((colletter(HX[colname]),val,isnum))
             for e in bil:
                 cod=code_from_name(e["name"])
-                if not cod or cod not in rows: print(f"   bilancio ignorato (cliente non trovato): {e['name']}"); continue
-                rep=parse_report(dl(t,e["path_lower"])); ups=[]
-                for col,key,isnum in CREDIT:
-                    v=rep.get(key)
-                    if col in HX and v not in (None,""): ups.append((colletter(HX[col]),v,isnum))
-                if ups: updates[rows[cod]]=ups; print(f"   bilancio {cod}: {len(ups)} campi credito")
-            if updates:
-                ul(t,DBX,apply_master_credit(xlsx,updates)); print(f"crm-database.xlsx aggiornato: credito di {len(updates)} clienti.")
+                if not cod: print(f"   bilancio ignorato: {e['name']}"); continue
+                rep=parse_report(dl(t,e["path_lower"]))
+                for col,key,isnum in CREDIT: addm(cod,col,rep.get(key),isnum)
+                print(f"   bilancio {cod} letto")
+            new_orders={}
+            for e in det:
+                espos,ordini=parse_dettaglio(dl(t,e["path_lower"]))
+                for cod,v in espos.items(): addm(cod,"Esposizione corrente (€)",v,True)
+                new_orders.update(ordini)
+                print(f"   dettaglio: {len(espos)} esposizioni, {len(ordini)} ordini letti")
+            if mupd:
+                xlsx=apply_master_credit(xlsx,mupd); print(f"   Master aggiornato: {len(mupd)} clienti (credito/esposizione).")
+            if new_orders:
+                hdr,col,docs,last=read_vendite_layout(xlsx)
+                add={d:o for d,o in new_orders.items() if d not in docs and o.get("cli") in rows}
+                if add:
+                    xlsx,_=add_orders(xlsx,add,hdr,col,last); print(f"   Vendite: +{len(add)} ordini aperti nuovi.")
+                else: print("   Vendite: nessun ordine nuovo da aggiungere.")
+            ul(t,DBX,xlsx); print("crm-database.xlsx aggiornato.")
     day=datetime.date.today().isoformat()
     for e in files:
         r=move(t,e["path_lower"],f"{CARIC}/archivio/{day}/{e['name']}")
