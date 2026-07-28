@@ -203,7 +203,7 @@
       <div class="kpis" id="kpi-mag"></div>
       <div class="charts">
         <div class="chartbox wide"><h4>Giacenze per materiale / nave</h4><table class="st" id="tbl-qual"></table></div>
-        <div class="chartbox wide"><h4>Uscite mensili 2026 (tonnellate)</h4><div class="cwrap"><canvas id="chUscite"></canvas></div></div>
+        <div class="chartbox wide"><h4>Uscite mensili 2026 (t) — da contratti / opzionato</h4><div class="cwrap"><canvas id="chUscite"></canvas></div></div>
       </div>
     </div>
   </section>
@@ -219,7 +219,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "8";
+const APP_VERSION = "9";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -525,24 +525,24 @@ function renderMagazzino(){
   const kmag=document.getElementById('kpi-mag');
   try{
     destroyCharts();
-    const op=OPER||{}, giac=op.giacenze||[], e=op.esposizione||{}, us=op.uscite_mensili||[];
-    if(!giac.length && !us.length){
-      kmag.innerHTML='<div class="pempty">Dati magazzino non ancora caricati. Metti i file esposizione/magazzino nella cartella caricamenti: aggiornamento alle 10:00 e 18:00.</div>';
+    const op=OPER||{}, mag=op.magazzino||{}, voci=mag.voci||[], us=op.uscite_mensili||[];
+    if(!voci.length && !us.length){
+      kmag.innerHTML='<div class="pempty">Dati magazzino non ancora disponibili nello snapshot.</div>';
       const t=document.getElementById('tbl-qual'); if(t) t.innerHTML=''; return;
     }
-    const totTon=giac.reduce((a,g)=>a+(Number(g.ton)||0),0);
-    const valEur=giac.reduce((a,g)=>a+(Number(g.val_eur)||0),0);
+    const disp=(mag.disponibile_totale!=null)?mag.disponibile_totale:voci.reduce((a,v)=>a+(Number(v.disponibile)||0),0);
     const uytd=us.reduce((a,m)=>a+(Number(m.tonnellate)||0),0);
-    const disp=(e.giacenza_ton!=null?e.giacenza_ton:totTon);
     const vals=us.map(m=>Number(m.tonnellate)||0).filter(v=>v>0);
     const media=vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:0;
-    const cop=(media&&disp)?(Math.round((disp/media)*10)/10)+' mesi':'—';
+    const cop=(media&&disp>0)?(Math.round((disp/media)*10)/10)+' mesi':'—';
+    const byq={}; voci.forEach(v=>{const q=v.qualita||'—'; byq[q]=(byq[q]||0)+(Number(v.disponibile)||0);});
     kmag.innerHTML=
       kpi(tons(disp),'Disponibile a terra','')+kpi(tons(uytd),'Uscite YTD 2026','')
-      +kpi(cop,'Copertura','')+kpi(euro(valEur),'Valore giacenze (€)','');
+      +kpi(cop,'Copertura','')+kpi(num(Object.keys(byq).length),'Qualità a stock','');
     document.getElementById('tbl-qual').innerHTML=
-      `<tr><th>Materiale</th><th>Origine</th><th class="num">Ton</th><th class="num">€/t</th><th class="num">Valore €</th></tr>`+
-      giac.map(g=>`<tr><td>${esc(g.materiale)}</td><td>${esc(g.origine)}</td><td class="num">${num(g.ton)}</td><td class="num">${g.prezzo_eur!=null?num(g.prezzo_eur):'—'}</td><td class="num">${g.val_eur!=null?euro(g.val_eur):'—'}</td></tr>`).join("");
+      `<tr><th>Qualità</th><th>Prodotto</th><th>Nave/Lotto</th><th class="num">Prezzo</th><th class="num">Disponibile t</th></tr>`+
+      voci.slice().sort((a,b)=>(Number(b.disponibile)||0)-(Number(a.disponibile)||0))
+        .map(v=>`<tr><td>${esc(v.qualita)}</td><td>${esc(v.prodotto||'—')}</td><td>${esc(v.nave||'—')}</td><td class="num">${esc(v.prezzo||'—')}</td><td class="num">${num(v.disponibile)}</td></tr>`).join("");
     const MN=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
     mkChart('chUscite','bar',us.map(x=>MN[parseInt(x.mese,10)-1]),us.map(x=>x.tonnellate),null);
   }catch(err){ if(kmag) kmag.innerHTML='<div class="pempty">Errore: '+esc(String(err))+'</div>'; }
