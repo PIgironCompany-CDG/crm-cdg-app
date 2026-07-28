@@ -120,6 +120,11 @@
   .st .num{text-align:right;font-variant-numeric:tabular-nums}
   .rar{margin-top:10px;font-size:12px;color:#b3261e}
   .pcat{font-size:11px;font-weight:700;color:var(--mid);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.03em}
+  .badge{display:inline-block;background:#c0392b;color:#fff;border-radius:12px;padding:1px 7px;font-size:11px;font-weight:800;margin-left:4px}
+  .pill.nonletta{border-left:4px solid var(--blue);background:#fff}
+  .pill.task{background:#eef4ff}
+  .ptag{display:inline-block;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mid);margin-bottom:4px}
+  .plink{color:var(--blue);cursor:pointer;text-decoration:underline}
   .pstrip{display:flex;gap:8px;overflow-x:auto;padding:12px 16px 0;-webkit-overflow-scrolling:touch}
   .pchip{flex:0 0 auto;background:#fff;border:1px solid var(--line);border-radius:20px;padding:6px 13px;font-size:13px;cursor:pointer;white-space:nowrap}
   .pchip.on{background:var(--dark);color:#fff;border-color:var(--dark)}
@@ -159,6 +164,7 @@
   <nav class="tabs">
     <button data-tab="clienti" class="on">Clienti</button>
     <button data-tab="fornitori">Fornitori</button>
+    <button data-tab="inbox">Inbox <span id="badge" class="badge hidden">0</span></button>
     <button data-tab="dash">Dashboard</button>
   </nav>
 
@@ -183,6 +189,18 @@
     <div class="count" id="countF"></div>
     <div class="grid" id="gridF"></div>
     <div class="empty hidden" id="emptyF">Nessun fornitore. Premi "+ Nuovo fornitore" per aggiungerne uno.</div>
+  </section>
+
+  <section id="tab-inbox" class="hidden">
+    <div class="dsub">
+      <button class="on" data-i="tutte">Tutte</button>
+      <button data-i="nonlette">Non lette</button>
+      <button data-i="task">Task assegnati</button>
+      <button data-i="menzioni">Menzioni</button>
+    </div>
+    <div class="count" id="countI"></div>
+    <div class="pilllist" id="listI" style="padding:0 16px 80px"></div>
+    <div class="empty hidden" id="emptyI">Nessuna notifica.</div>
   </section>
 
   <section id="tab-dash" class="hidden">
@@ -230,7 +248,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "12";
+const APP_VERSION = "13";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -244,6 +262,7 @@ let VEND = {mensili:[],totali:{}};
 let OPER = {};
 let INTER = {};
 let FORN = {};
+let NOTIF = [];
 let TIPO = "", PRESET = null, charts = {};
 
 function esc(s){return (s==null?"":String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -278,6 +297,7 @@ async function loadData(){
   OPER = snap.operativa || {};
   INTER = j.interazioni || {};
   FORN = j.fornitori || {};
+  NOTIF = j.notifiche || [];
   const byCode={}; (snap.clienti||[]).forEach(c=>{ byCode[c.codice]=Object.assign({},c); });
   // nuovi clienti creati dall'app e non ancora nel database
   (j.nuovi||[]).forEach(n=>{ if(n&&n.codice&&!byCode[n.codice]) byCode[n.codice]=Object.assign({status:"Prospect",stato_attivita:"Da fare"},n.fields||{}); });
@@ -350,11 +370,16 @@ function openDrawer(c){
       ${inp("stato_followup","Stato follow-up",c.stato_followup)}
     </div>
     <div class="sec"><h3>Note <button type="button" class="addbtn" onclick="showAdd('nota')">+ Aggiungi nota</button></h3>
-      <div id="addbox-nota" class="addbox hidden"><textarea id="new-nota" class="fi" rows="2" placeholder="Scrivi una nota…"></textarea><div><button type="button" onclick="addInter('nota')">Aggiungi nota</button></div></div>
+      <div id="addbox-nota" class="addbox hidden"><textarea id="new-nota" class="fi" rows="2" placeholder="Scrivi una nota…"></textarea>
+        <label class="fl">Menziona un collega (facoltativo)</label>${userSelect('assign-nota')}
+        <div><button type="button" onclick="addInter('nota')">Aggiungi nota</button></div></div>
       <div class="pilllist" id="list-nota"></div>
     </div>
     <div class="sec"><h3>Azioni <button type="button" class="addbtn" onclick="showAdd('azione')">+ Aggiungi azione</button></h3>
-      <div id="addbox-azione" class="addbox hidden"><textarea id="new-azione" class="fi" rows="2" placeholder="Descrivi l'azione…"></textarea><div><button type="button" onclick="addInter('azione')">Aggiungi azione</button></div></div>
+      <div id="addbox-azione" class="addbox hidden"><textarea id="new-azione" class="fi" rows="2" placeholder="Descrivi l'azione…"></textarea>
+        <label class="fl">Assegna a (facoltativo)</label>${userSelect('assign-azione')}
+        <label class="fl">Scadenza (facoltativa)</label><input class="fi" id="due-azione" type="date">
+        <div><button type="button" onclick="addInter('azione')">Aggiungi azione</button></div></div>
       <div class="pilllist" id="list-azione"></div>
     </div>
     <div class="sec"><h3>Salute aziendale (sola lettura)</h3><div class="kv">
@@ -534,10 +559,66 @@ async function addInter(tp){
   if(!CURRENT) return;
   const ta=document.getElementById('new-'+tp); const testo=(ta.value||'').trim(); if(!testo) return;
   const cod=CURRENT.codice;
+  const asEl=document.getElementById('assign-'+tp); const dueEl=document.getElementById('due-'+tp);
+  const assegnato=asEl?asEl.value:''; const scadenza=dueEl?dueEl.value:'';
   const {ok,j}=await apiPost('/interazione',{codice:cod,tipo:tp,testo});
-  if(ok&&j.entry){ (INTER[cod]=INTER[cod]||[]).push(j.entry); ta.value=''; showAdd(tp); renderInter(cod); }
+  if(ok&&j.entry){
+    (INTER[cod]=INTER[cod]||[]).push(j.entry);
+    if(assegnato){
+      const nome=CURRENT.ragione||cod;
+      await apiPost('/notifica',{to:assegnato,tipo:(tp==='azione'?'task':'menzione'),
+        codice:cod,entita:'cliente',testo:(tp==='azione'?'Azione assegnata':'Menzione')+' su '+nome+': '+testo,
+        scadenza:scadenza||null});
+    }
+    ta.value=''; if(dueEl) dueEl.value=''; if(asEl) asEl.value='';
+    showAdd(tp); renderInter(cod);
+  }
   else alert('Errore nel salvataggio.');
 }
+
+// ---------- INBOX (menzioni e task assegnati) ----------
+const UTENTI=["francesco@pigironcompany.com","f.mastropasqua@pigironcompany.com","j.scarparo@pigironcompany.com"];
+function userSelect(id){
+  return `<select class="fi" id="${id}"><option value="">— nessuno —</option>`+
+    UTENTI.map(u=>`<option value="${esc(u)}">${esc(u.split('@')[0])}</option>`).join("")+`</select>`;
+}
+let INBOX_FILTER="tutte";
+function unread(){ return NOTIF.filter(n=>!n.letta).length; }
+function updateBadge(){
+  const b=document.getElementById('badge'); if(!b) return;
+  const n=unread(); b.textContent=n; b.classList.toggle('hidden', n===0);
+}
+function renderInbox(){
+  const list=document.getElementById('listI'); if(!list) return;
+  let items=NOTIF.slice().sort((a,b)=>String(b.ts||'').localeCompare(String(a.ts||'')));
+  if(INBOX_FILTER==='nonlette') items=items.filter(n=>!n.letta);
+  else if(INBOX_FILTER==='task') items=items.filter(n=>n.tipo==='task');
+  else if(INBOX_FILTER==='menzioni') items=items.filter(n=>n.tipo==='menzione');
+  document.getElementById('countI').textContent=`${items.length} notifiche · ${unread()} non lette`;
+  document.getElementById('emptyI').classList.toggle('hidden', items.length>0);
+  list.innerHTML=items.map(n=>`<div class="pill ${n.tipo==='task'?'task':''} ${!n.letta?'nonletta':''}">
+      <div class="ptag">${n.tipo==='task'?'Task assegnato':'Menzione'}${n.scadenza?' · scadenza '+esc(n.scadenza):''}</div>
+      <div class="ptext">${esc(n.testo)}</div>
+      <div class="pmeta">da ${esc((n.from||'').split('@')[0])} · ${fmtTs(n.ts)}
+        ${n.codice?` · <span class="plink" onclick="openByCod('${esc(n.codice)}')">apri scheda</span>`:''}</div>
+      <div class="pacts">
+        <button type="button" title="${n.letta?'Segna non letta':'Segna letta'}" onclick="toggleNotif('${n.id}',${n.letta?'false':'true'})">${n.letta?'○':'✓'}</button>
+        <button type="button" title="Elimina" onclick="delNotif('${n.id}')">🗑</button>
+      </div></div>`).join("");
+  updateBadge();
+}
+async function toggleNotif(id,letta){
+  const {ok}=await apiPost('/notifica-letta',{id,letta:(letta===true||letta==='true')});
+  if(ok){ const n=NOTIF.find(x=>x.id===id); if(n) n.letta=(letta===true||letta==='true'); renderInbox(); }
+}
+async function delNotif(id){
+  const {ok}=await apiPost('/notifica-delete',{id});
+  if(ok){ NOTIF=NOTIF.filter(x=>x.id!==id); renderInbox(); }
+}
+document.querySelectorAll('#tab-inbox .dsub button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#tab-inbox .dsub button').forEach(x=>x.classList.toggle('on',x===b));
+  INBOX_FILTER=b.dataset.i; renderInbox();
+});
 function editInter(id){
   if(!CURRENT) return;
   const it=(INTER[CURRENT.codice]||[]).find(x=>x.id===id); if(!it) return;
@@ -569,9 +650,11 @@ document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('on',x===b));
   document.getElementById('tab-clienti').classList.toggle('hidden', b.dataset.tab!=='clienti');
   document.getElementById('tab-fornitori').classList.toggle('hidden', b.dataset.tab!=='fornitori');
+  document.getElementById('tab-inbox').classList.toggle('hidden', b.dataset.tab!=='inbox');
   document.getElementById('tab-dash').classList.toggle('hidden', b.dataset.tab!=='dash');
   if(b.dataset.tab==='dash') renderDash();
   if(b.dataset.tab==='fornitori') renderForn();
+  if(b.dataset.tab==='inbox') renderInbox();
 });
 // sotto-tab dashboard
 document.querySelectorAll('.dsub button').forEach(b=>b.onclick=()=>{
@@ -730,6 +813,7 @@ async function start(){
   renderPStrip();
   render();
   renderForn();
+  renderInbox();
 }
 
 // avvio: se ho un token valido, entro; altrimenti login
