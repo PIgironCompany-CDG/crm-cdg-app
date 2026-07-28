@@ -23,6 +23,7 @@ APP_KEY = os.environ["DROPBOX_APP_KEY"]
 REFRESH_TOKEN = os.environ["DROPBOX_REFRESH_TOKEN"]
 DB_PATH = "/crm-database.xlsx"
 SNAPSHOT_PATH = "/snapshot.json"
+OPERATIVA_PATH = "/operativa.json"   # dati esposizione/magazzino consolidati da ingest.py
 
 TOKEN_URL = "https://api.dropbox.com/oauth2/token"
 DOWNLOAD_URL = "https://content.dropboxapi.com/2/files/download"
@@ -56,6 +57,14 @@ def download(token, path):
     }, timeout=60)
     r.raise_for_status()
     return r.content
+
+def download_opt(token, path):
+    """Download che ritorna None se il file non esiste (no eccezione)."""
+    r = requests.post(DOWNLOAD_URL, headers={
+        "Authorization": f"Bearer {token}",
+        "Dropbox-API-Arg": json.dumps({"path": path}),
+    }, timeout=60)
+    return r.content if r.status_code == 200 else None
 
 def upload(token, path, data: bytes):
     r = requests.post(UPLOAD_URL, headers={
@@ -188,6 +197,19 @@ def main():
     xlsx = download(token, DB_PATH)
     print(f"Database scaricato ({len(xlsx)} byte). Costruisco lo snapshot...")
     snap = build(xlsx)
+    # Operativa CENTRALIZZATA: /operativa.json (prodotto da ingest.py dai file esposizione/magazzino).
+    opraw = download_opt(token, OPERATIVA_PATH)
+    try:
+        snap["operativa"] = json.loads(opraw) if opraw else {}
+    except Exception:
+        snap["operativa"] = {}
+    op = snap["operativa"]
+    print(f"OPERATIVA: righe_esposizione={len((op.get('esposizione') or {}).get('righe',[]))} "
+          f"giacenze={len(op.get('giacenze',[]))} "
+          f"uscite_valorizzate={sum(1 for m in op.get('uscite_mensili',[]) if m.get('tonnellate'))} "
+          f"aggiornato={op.get('aggiornato')}")
+    if not op.get('esposizione') and not op.get('giacenze'):
+        print("NOTA: operativa.json assente o vuoto. Carica i file in /caricamenti; l'ingest gira alle 10:00 e 18:00.")
     blob = json.dumps(snap, ensure_ascii=False).encode("utf-8")
     upload(token, SNAPSHOT_PATH, blob)
     print(f"Snapshot pubblicato: {snap['n_clienti']} clienti, {len(blob)} byte.")

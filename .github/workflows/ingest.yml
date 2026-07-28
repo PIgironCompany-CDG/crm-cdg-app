@@ -1,0 +1,35 @@
+name: Ingestione caricamenti
+
+# Controlla /caricamenti, consolida in operativa.json, archivia e svuota, poi rigenera lo snapshot.
+# Due volte al giorno: 10:00 e 18:00 (ora italiana legale = 08:00 e 16:00 UTC).
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 8 * * *"
+    - cron: "0 16 * * *"
+
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Installa dipendenze
+        run: pip install -r scripts/requirements.txt
+      - name: Ingestione caricamenti
+        env:
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+        run: python scripts/ingest.py
+      - name: Rigenera snapshot
+        env:
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+        run: python scripts/build_snapshot.py

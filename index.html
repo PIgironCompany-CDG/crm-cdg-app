@@ -178,6 +178,7 @@
     <div class="dsub">
       <button class="on" data-d="mercato">Mercato / Portafoglio</button>
       <button data-d="vendite">Vendite</button>
+      <button data-d="magazzino">Magazzino</button>
     </div>
     <div id="d-mercato" class="dpane">
       <h3 class="dh3">Overview vendite YTD</h3>
@@ -195,11 +196,13 @@
       <p class="dsubt">Crediti clienti · merce a terra · CBAM</p>
       <div class="kpis" id="kpi-esp"></div>
       <div class="chartbox"><table class="st" id="tbl-esp"></table></div>
+    </div>
+    <div id="d-magazzino" class="dpane hidden">
       <h3 class="dh3">Magazzino e disponibilità</h3>
-      <p class="dsubt">Materiale a terra e copertura</p>
+      <p class="dsubt">Materiale a terra, copertura e giacenze</p>
       <div class="kpis" id="kpi-mag"></div>
       <div class="charts">
-        <div class="chartbox wide"><h4>Dettaglio lotti disponibili</h4><table class="st" id="tbl-lotti"></table></div>
+        <div class="chartbox wide"><h4>Giacenze per materiale / nave</h4><table class="st" id="tbl-qual"></table></div>
         <div class="chartbox wide"><h4>Uscite mensili 2026 (tonnellate)</h4><div class="cwrap"><canvas id="chUscite"></canvas></div></div>
       </div>
     </div>
@@ -216,7 +219,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "6";
+const APP_VERSION = "8";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -426,7 +429,7 @@ document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
 // sotto-tab dashboard
 document.querySelectorAll('.dsub button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.dsub button').forEach(x=>x.classList.toggle('on',x===b));
-  ['mercato','vendite','pipeline'].forEach(d=>document.getElementById('d-'+d).classList.toggle('hidden',d!==b.dataset.d));
+  ['mercato','vendite','magazzino'].forEach(d=>document.getElementById('d-'+d).classList.toggle('hidden',d!==b.dataset.d));
   renderDash();
 });
 // i filtri manuali azzerano tipologia/preset impostati dai click dashboard
@@ -502,36 +505,54 @@ function openByCod(cod){ const c=DATA.find(x=>x.codice===cod); if(c) openDrawer(
 function renderVendite(){
   const kesp=document.getElementById('kpi-esp');
   try{
-    destroyCharts();
-    const op=OPER||{};
-    const hasData = op && op.esposizione && (op.esposizione.totale!=null || (op.lotti&&op.lotti.length));
-    if(!hasData){
-      kesp.innerHTML='<div class="pempty">Dati operativi non presenti nello snapshot. Rilancia il workflow "Build snapshot da Dropbox" e ricarica. (chiavi ricevute: '+esc(Object.keys(op||{}).join(', ')||'nessuna')+')</div>';
-      ['tbl-esp','kpi-mag','tbl-lotti'].forEach(id=>{const el=document.getElementById(id); if(el) el.innerHTML='';});
-      return;
+    const op=OPER||{}, e=op.esposizione||{}, righe=e.righe||[];
+    if(!righe.length){
+      kesp.innerHTML='<div class="pempty">Dati esposizione non ancora caricati. Metti il file ESPOSIZIONE nella cartella caricamenti: l\'aggiornamento avviene alle 10:00 e alle 18:00.</div>';
+      const t=document.getElementById('tbl-esp'); if(t) t.innerHTML=''; return;
     }
-    const e=op.esposizione||{}, m=op.magazzino||{};
+    const tot=righe.find(r=>String(r.voce||'').toUpperCase().trim()==='TOTALE');
     kesp.innerHTML=
-      kpi(euro(e.clienti),'Esposizione clienti','')+kpi(euro(e.merce_a_terra),'Merce a terra','')+kpi(euro(e.totale),'Esposizione totale','');
+      (tot?kpi('€ '+num(Math.round(tot.eur||0)),'Esposizione totale (€)','$ '+num(Math.round(tot.usd||0))):'')
+      +(e.giacenza_ton!=null?kpi(tons(e.giacenza_ton),'Giacenza complessiva',''):'')
+      +kpi(op.aggiornato||'—','Aggiornato al','');
     document.getElementById('tbl-esp').innerHTML=
-      `<tr><th>Voce</th><th class="num">€</th><th class="num">$</th></tr>`+
-      (e.voci||[]).map(v=>`<tr><td>${esc(v.voce)}</td><td class="num">${v.eur!=null?euro(v.eur):'—'}</td><td class="num">${v.usd!=null?('$ '+num(Math.round(v.usd))):'—'}</td></tr>`).join("");
-    document.getElementById('kpi-mag').innerHTML=
-      kpi(tons(m.disponibile_ton),'Disponibile a terra','')+kpi(tons(m.uscite_ytd_ton),'Uscite YTD 2026','')+kpi(num(m.mesi_copertura)+' mesi','Copertura','');
-    document.getElementById('tbl-lotti').innerHTML=
-      `<tr><th>Qualità</th><th>Nave/Lotto</th><th class="num">Ton</th><th class="num">€/t</th><th>Note</th></tr>`+
-      (op.lotti||[]).map(l=>`<tr><td>${esc(l.qualita)}</td><td>${esc(l.lotto)}</td><td class="num">${num(l.ton)}</td><td class="num">${l.prezzo_eur!=null?('€ '+num(l.prezzo_eur)):'—'}</td><td>${esc(l.note)}</td></tr>`).join("");
+      `<tr><th>Voce</th><th class="num">Ghisa $</th><th class="num">Ghisa €</th></tr>`+
+      righe.map(r=>{const b=/totale/i.test(r.voce||'')?' style="font-weight:700"':'';
+        return `<tr${b}><td>${esc(r.voce)}</td><td class="num">${r.usd!=null?('$ '+num(Math.round(r.usd))):'—'}</td><td class="num">${r.eur!=null?('€ '+num(Math.round(r.eur))):'—'}</td></tr>`;}).join("");
+  }catch(err){ if(kesp) kesp.innerHTML='<div class="pempty">Errore: '+esc(String(err))+'</div>'; }
+}
+function renderMagazzino(){
+  const kmag=document.getElementById('kpi-mag');
+  try{
+    destroyCharts();
+    const op=OPER||{}, giac=op.giacenze||[], e=op.esposizione||{}, us=op.uscite_mensili||[];
+    if(!giac.length && !us.length){
+      kmag.innerHTML='<div class="pempty">Dati magazzino non ancora caricati. Metti i file esposizione/magazzino nella cartella caricamenti: aggiornamento alle 10:00 e 18:00.</div>';
+      const t=document.getElementById('tbl-qual'); if(t) t.innerHTML=''; return;
+    }
+    const totTon=giac.reduce((a,g)=>a+(Number(g.ton)||0),0);
+    const valEur=giac.reduce((a,g)=>a+(Number(g.val_eur)||0),0);
+    const uytd=us.reduce((a,m)=>a+(Number(m.tonnellate)||0),0);
+    const disp=(e.giacenza_ton!=null?e.giacenza_ton:totTon);
+    const vals=us.map(m=>Number(m.tonnellate)||0).filter(v=>v>0);
+    const media=vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:0;
+    const cop=(media&&disp)?(Math.round((disp/media)*10)/10)+' mesi':'—';
+    kmag.innerHTML=
+      kpi(tons(disp),'Disponibile a terra','')+kpi(tons(uytd),'Uscite YTD 2026','')
+      +kpi(cop,'Copertura','')+kpi(euro(valEur),'Valore giacenze (€)','');
+    document.getElementById('tbl-qual').innerHTML=
+      `<tr><th>Materiale</th><th>Origine</th><th class="num">Ton</th><th class="num">€/t</th><th class="num">Valore €</th></tr>`+
+      giac.map(g=>`<tr><td>${esc(g.materiale)}</td><td>${esc(g.origine)}</td><td class="num">${num(g.ton)}</td><td class="num">${g.prezzo_eur!=null?num(g.prezzo_eur):'—'}</td><td class="num">${g.val_eur!=null?euro(g.val_eur):'—'}</td></tr>`).join("");
     const MN=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
-    const us=op.uscite_mensili||[];
     mkChart('chUscite','bar',us.map(x=>MN[parseInt(x.mese,10)-1]),us.map(x=>x.tonnellate),null);
-  }catch(err){
-    if(kesp) kesp.innerHTML='<div class="pempty">Errore nel rendering: '+esc(String(err))+'</div>';
-  }
+  }catch(err){ if(kmag) kmag.innerHTML='<div class="pempty">Errore: '+esc(String(err))+'</div>'; }
 }
 function renderDash(){
   if(!DATA.length) return;
-  const vend=!document.getElementById('d-vendite').classList.contains('hidden');
-  if(vend) renderVendite(); else renderMercato();
+  const hidden=id=>document.getElementById(id).classList.contains('hidden');
+  if(!hidden('d-vendite')) renderVendite();
+  else if(!hidden('d-magazzino')) renderMagazzino();
+  else renderMercato();
 }
 // pipeline come filtro nella sezione Clienti
 const BUCKETS=[
