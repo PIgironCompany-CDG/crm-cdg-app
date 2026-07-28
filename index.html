@@ -248,7 +248,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "13";
+const APP_VERSION = "14";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -577,7 +577,8 @@ async function addInter(tp){
 }
 
 // ---------- INBOX (menzioni e task assegnati) ----------
-const UTENTI=["francesco@pigironcompany.com","f.mastropasqua@pigironcompany.com","j.scarparo@pigironcompany.com"];
+const UTENTI=["francesco@pigironcompany.com","f.mastropasqua@pigironcompany.com","j.scarparo@pigironcompany.com",
+              "marta@pigironcompany.com","tommaso@compagniacommerciale.eu"];
 function userSelect(id){
   return `<select class="fi" id="${id}"><option value="">— nessuno —</option>`+
     UTENTI.map(u=>`<option value="${esc(u)}">${esc(u.split('@')[0])}</option>`).join("")+`</select>`;
