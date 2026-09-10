@@ -225,14 +225,70 @@ def parse_dettaglio(pdf_bytes):
                 imp=res=None
                 if decs:
                     eur_i=decs[-2] if len(decs)>=2 else decs[-1]; imp=money(toks[eur_i])
+                    # La quantità residua è il token subito prima dell'Importo EUR e PUÒ avere
+                    # decimali (es. "648,52"). Cercando solo interi si prendeva per sbaglio
+                    # l'Importo.Orig (es. 499000), gonfiando la quantità di 1000 volte.
                     for k in range(eur_i-1,-1,-1):
-                        if re.match(r'^\d+$',toks[k]): res=int(toks[k]); break
+                        if re.match(r'^[\d.]+(?:,\d+)?$',toks[k]): res=money(toks[k]); break
                 ds=None; md=re.search(r'(\d{2}/\d{2}/\d{4})', ln)
                 if md:
                     try: ds=(datetime.datetime.strptime(md.group(1),"%d/%m/%Y").date()-EPOCH).days
                     except: ds=None
-                ordini[doc]={"cli":cur,"qty_kg":(res or 0)*1000,"imp":imp or 0,"data_serial":ds}
+                # quantità/importo ORIGINALI del contratto: servono a ricavare il consegnato
+                # (consegnato = originale - residuo), dato che i file non riportano le
+                # quantità delle singole fatture.
+                i_doc=toks.index(doc) if doc in toks else 0
+                nums=[x for x in toks[i_doc+1:] if re.match(r'^[\d.]+(?:,\d+)?$',x)]
+                q_or=money(nums[0]) if len(nums)>=1 else None
+                i_or=money(nums[1]) if len(nums)>=2 else None
+                ordini[doc]={"cli":cur,"qty_kg":round((res or 0)*1000),"imp":imp or 0,"data_serial":ds,
+                             "q_orig_kg":(round(q_or*1000) if q_or is not None else None),
+                             "imp_orig":i_or}
     return espos,ordini
+
+
+def read_vendite_full(xlsx_bytes):
+    """Layout del foglio Vendite + stato per contratto.
+
+    Ritorna (hdr, col, last, stato) dove stato[documento] = {
+      'fat_kg','fat_imp'   somma delle righe già registrate come Fattura
+      'ord_row'            riga della quota ancora aperta (Stato = Ordine), se c'è
+      'ord_kg','ord_imp'   valori attualmente scritti su quella riga
+      'eredita'            Prodotto/Qualità/Produttore/Pagamento presi dalle righe esistenti
+    }
+    """
+    wb=openpyxl.load_workbook(io.BytesIO(xlsx_bytes),read_only=True,data_only=True)
+    V=wb["Vendite"]; hdr=None; col={}; stato={}; last=1
+    for ri,row in enumerate(V.iter_rows(values_only=True),1):
+        vals=[str(c).strip() if c is not None else "" for c in row]
+        if hdr is None:
+            if "Data" in vals and "Cod.Cli" in vals and "N. documento" in vals:
+                hdr=ri
+                for i,v in enumerate(vals,1):
+                    if v: col[v]=i
+            continue
+        g=lambda n: row[col[n]-1] if n in col and col[n]-1<len(row) else None
+        doc=g("N. documento")
+        if doc in (None,""): continue
+        d=str(doc).strip(); last=ri
+        st=stato.setdefault(d,{"fat_kg":0.0,"fat_imp":0.0,"ord_row":None,
+                               "ord_kg":None,"ord_imp":None,"eredita":{},
+                               "cli":None,"ord_data":None})
+        if st["cli"] is None and g("Cod.Cli") not in (None,""): st["cli"]=str(g("Cod.Cli")).strip()
+        for nome in ("Prodotto","Qualità","Produttore","Pagamento"):
+            v=g(nome)
+            if v not in (None,"") and nome not in st["eredita"]: st["eredita"][nome]=v
+        s=str(g("Stato") or "").strip()
+        if s=="Fattura":
+            st["fat_kg"]+=g("Quantità (kg)") or 0; st["fat_imp"]+=g("Importo") or 0
+        elif s=="Ordine":
+            st["ord_row"]=ri; st["ord_kg"]=g("Quantità (kg)"); st["ord_imp"]=g("Importo")
+            dv=g("Data")
+            if isinstance(dv,(datetime.date,datetime.datetime)):
+                dv=dv.date() if isinstance(dv,datetime.datetime) else dv
+                st["ord_data"]=(dv-datetime.date(1899,12,30)).days
+            elif isinstance(dv,(int,float)): st["ord_data"]=int(dv)
+    wb.close(); return hdr,col,last,stato
 
 def read_vendite_layout(xlsx_bytes):
     wb=openpyxl.load_workbook(io.BytesIO(xlsx_bytes),read_only=True,data_only=True)
@@ -253,17 +309,103 @@ def read_vendite_layout(xlsx_bytes):
             if c not in (None,""): last=ri
     wb.close(); return hdr,col,docs,last
 
-def add_orders(xlsx_bytes,new_orders,hdr,col,last):
+SOGLIA_T = 0.5      # tonnellate: sotto questa differenza non si registra nulla
+SOGLIA_EUR = 100.0  # euro
+
+
+def pianifica_vendite(contratti, stato, clienti_noti, clienti_nel_report=None):
+    """Decide cosa scrivere nel foglio Vendite, senza toccare il file.
+
+    - consegne: righe Fattura nuove per la quota consegnata e non ancora registrata
+                (consegnato = quantità originale del contratto - residuo attuale)
+    - residui : aggiornamento della riga Ordine quando il residuo è cambiato
+    - nuovi   : contratti mai visti, da inserire come Ordine aperto
+    - evasi   : righe Ordine il cui contratto non è più nel DETTAGLIO -> Stato "Evaso"
+    """
+    consegne, residui, nuovi, evasi = [], [], {}, []
+    for doc, o in contratti.items():
+        if clienti_noti and o.get("cli") not in clienti_noti:
+            continue
+        st = stato.get(doc)
+        if st is None:
+            nuovi[doc] = o
+            continue
+        if o.get("q_orig_kg") is not None and o.get("imp_orig") is not None:
+            cons_kg = o["q_orig_kg"] - o["qty_kg"]
+            cons_eur = o["imp_orig"] - o["imp"]
+            d_kg = cons_kg - st["fat_kg"]
+            d_eur = cons_eur - st["fat_imp"]
+            # solo consegne in più: se a database risulta di più, il contratto è stato
+            # ampliato o rifornito oltre l'originale -> non si tocca nulla
+            if d_kg > SOGLIA_T * 1000 or d_eur > SOGLIA_EUR:
+                kg = round(max(d_kg, 0)); eur = round(max(d_eur, 0.0), 2)
+                # coerenza: quantità e valore devono muoversi insieme. Se una delle due è
+                # a zero mentre l'altra è rilevante, il dato del PDF è incoerente
+                # (capita su contratti senza importo residuo): meglio segnalare che scrivere.
+                if (kg <= 0 and eur > SOGLIA_EUR) or (eur <= 0 and kg > SOGLIA_T * 1000):
+                    print(f"   ! {doc} ({o['cli']}): consegna incoerente "
+                          f"({kg/1000:.2f} t / {eur:,.2f} EUR) - ignorata, da verificare a mano.")
+                else:
+                    consegne.append({"doc": doc, "cli": o["cli"], "kg": kg, "imp": eur,
+                                     "data_serial": o.get("data_serial"),
+                                     "eredita": st["eredita"]})
+        if st["ord_row"]:
+            dk = abs((st["ord_kg"] or 0) - o["qty_kg"])
+            de = abs((st["ord_imp"] or 0) - o["imp"])
+            if dk > SOGLIA_T * 1000 or de > SOGLIA_EUR:
+                residui.append({"row": st["ord_row"], "kg": o["qty_kg"], "imp": o["imp"], "doc": doc})
+    # Chiusure: un ordine si considera evaso SOLO se il suo cliente compare nel DETTAGLIO
+    # (quindi il report lo copre) ma il contratto non è più tra quelli aperti. Se il cliente
+    # manca del tutto, il report è parziale su di lui e non si conclude nulla.
+    # Il residuo che sparisce è merce consegnata: va registrato, non cancellato.
+    for doc, st in stato.items():
+        if not st["ord_row"] or doc in contratti: continue
+        if (st["ord_kg"] or 0) <= 0 and (st["ord_imp"] or 0) <= 0: continue
+        cli = st.get("cli")
+        if clienti_nel_report is not None and cli not in clienti_nel_report: continue
+        evasi.append({"row": st["ord_row"], "doc": doc})
+        if (st["ord_kg"] or 0) > 0 or (st["ord_imp"] or 0) > 0:
+            consegne.append({"doc": doc, "cli": cli, "kg": round(st["ord_kg"] or 0),
+                             "imp": round(st["ord_imp"] or 0.0, 2),
+                             "data_serial": st.get("ord_data"), "eredita": st["eredita"],
+                             "finale": True})
+    return consegne, residui, nuovi, evasi
+
+
+def _set_cell(s, letter, row, value, isnum):
+    """Sostituisce il valore di una cella esistente conservandone lo stile."""
+    ref = f"{letter}{row}"
+    m = re.search(r'<c r="%s"([^>]*?)(?:/>|>(.*?)</c>)' % ref, s, re.DOTALL)
+    if not m:
+        return s, False
+    attrs = m.group(1)
+    attrs = re.sub(r'\s+t="[^"]*"', '', attrs)      # via il tipo precedente
+    if isnum:
+        nuovo = f'<c r="{ref}"{attrs}><v>{value}</v></c>'
+    else:
+        v = str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        nuovo = f'<c r="{ref}"{attrs} t="inlineStr"><is><t>{v}</t></is></c>'
+    return s[:m.start()] + nuovo + s[m.end():], True
+
+
+def add_orders(xlsx_bytes,new_orders,hdr,col,last,consegne=None,residui=None,evasi=None):
+    """Scrive nel foglio Vendite: nuovi ordini aperti, consegne (righe Fattura),
+    aggiornamento dei residui e chiusura degli ordini evasi. Sempre in chirurgia
+    XML: openpyxl in scrittura distruggerebbe formattazione condizionale e formule."""
     z=zipfile.ZipFile(io.BytesIO(xlsx_bytes)); parts={n:z.read(n) for n in z.namelist()}; infos=z.infolist(); z.close()
     wbx=parts['xl/workbook.xml'].decode()
     rid=re.search(r'<sheet name="Vendite"[^>]*r:id="(rId\d+)"',wbx).group(1)
     tgt=re.search(r'Id="%s"[^>]*Target="([^"]*)"'%rid,parts['xl/_rels/workbook.xml.rels'].decode()).group(1)
     sf="xl/"+tgt.replace("\\","/"); s=parts[sf].decode()
     tabfile=next((n for n in parts if n.startswith("xl/tables/") and b"tbl_Vendite" in parts[n]),None)
-    tx=parts[tabfile].decode(); L={n:colletter(i) for n,i in col.items()}; maxcol=max(col.values())
+    # ATTENZIONE: col[] è 1-based (enumerate(...,1) in read_vendite_layout) mentre
+    # colletter() è 0-based -> serve i-1. Senza il -1 ogni valore finiva una colonna
+    # più a destra (data in "Cod.Cli", ecc.) e il controllo anti-duplicato, che legge
+    # la colonna giusta, non trovava mai i documenti: ordini reinseriti a ogni giro.
+    tx=parts[tabfile].decode(); L={n:colletter(i-1) for n,i in col.items()}; maxcol=max(col.values())
     style_of={}
     for name,idx in col.items():
-        letter=colletter(idx); m=re.search(r'<c r="%s%d"([^>]*?)(?:/>|>)'%(letter,last),s)
+        letter=colletter(idx-1); m=re.search(r'<c r="%s%d"([^>]*?)(?:/>|>)'%(letter,last),s)
         sm=re.search(r's="(\d+)"',m.group(1)) if m else None; style_of[name]=sm.group(1) if sm else None
     FORMULAS={}
     for chunk in tx.split('<tableColumn')[1:]:
@@ -277,22 +419,43 @@ def add_orders(xlsx_bytes,new_orders,hdr,col,last):
         if value in (None,""): return f'<c r="{letter}{r}"{sa}/>'
         if isnum: return f'<c r="{letter}{r}"{sa}><v>{value}</v></c>'
         return f'<c r="{letter}{r}"{sa} t="inlineStr"><is><t>{esc(value)}</t></is></c>'
+    # --- 1) aggiornamento delle righe già presenti (residui e ordini evasi) ---
+    n_res=n_eva=0
+    for u in (residui or []):
+        for nome,val,isnum in (("Quantità (kg)",u["kg"],True),("Importo",u["imp"],True)):
+            if nome in L:
+                s,done=_set_cell(s,L[nome],u["row"],val,isnum); n_res+=1 if done else 0
+    for u in (evasi or []):
+        if "Stato" in L:
+            s,done=_set_cell(s,L["Stato"],u["row"],"Evaso",False); n_eva+=1 if done else 0
+        # un ordine evaso non ha più residuo
+        for nome in ("Quantità (kg)","Importo"):
+            if nome in L: s,_=_set_cell(s,L[nome],u["row"],0,True)
+
+    # --- 2) righe nuove (ordini aperti e consegne) ---
     rows_xml=[]; r=last+1
-    for doc in sorted(new_orders):
-        o=new_orders[doc]; cells=[]
+    def riga(o,doc,stato_val,eredita=None):
+        cells=[]
         for name,idx in sorted(col.items(),key=lambda kv:kv[1]):
-            if name=="Data": cells.append(cell(name,r,o["data_serial"],True) if o.get("data_serial") else cell(name,r))
+            if name=="Data": cells.append(cell(name,r,o.get("data_serial"),True) if o.get("data_serial") else cell(name,r))
             elif name=="Cod.Cli": cells.append(cell(name,r,o["cli"]))
             elif name=="N. documento": cells.append(cell(name,r,doc))
-            elif name=="Quantità (kg)": cells.append(cell(name,r,o["qty_kg"],True))
+            elif name=="Quantità (kg)": cells.append(cell(name,r,o.get("qty_kg",o.get("kg")),True))
             elif name=="Importo": cells.append(cell(name,r,o["imp"],True))
             elif name=="Valuta": cells.append(cell(name,r,"EUR"))
-            elif name=="Stato": cells.append(cell(name,r,"Ordine"))
+            elif name=="Stato": cells.append(cell(name,r,stato_val))
+            elif eredita and name in eredita: cells.append(cell(name,r,eredita[name]))
             else: cells.append(cell(name,r))
-        rows_xml.append(f'<row r="{r}" spans="1:{maxcol}">'+"".join(cells)+'</row>'); r+=1
+        return f'<row r="{r}" spans="1:{maxcol}">'+"".join(cells)+'</row>'
+    for doc in sorted(new_orders):
+        rows_xml.append(riga(new_orders[doc],doc,"Ordine")); r+=1
+    for cg in sorted(consegne or [], key=lambda x:x["doc"]):
+        rows_xml.append(riga(cg,cg["doc"],"Fattura",cg.get("eredita"))); r+=1
     newlast=r-1
+    if residui or evasi:
+        print(f"   Vendite: {n_res//2} residui aggiornati, {n_eva} ordini chiusi come Evasi.")
     s=s.replace('</sheetData>',"".join(rows_xml)+'</sheetData>',1)
-    s=re.sub(r'<dimension ref="A1:[A-Z]+\d+"/>',f'<dimension ref="A1:{colletter(maxcol)}{newlast}"/>',s)
+    s=re.sub(r'<dimension ref="A1:[A-Z]+\d+"/>',f'<dimension ref="A1:{colletter(maxcol-1)}{newlast}"/>',s)
     parts[sf]=s.encode()
     oref=re.search(r'ref="A%d:([A-Z]+)%d"'%(hdr,last),tx)
     if oref: tx=tx.replace('ref="A%d:%s%d"'%(hdr,oref.group(1),last),'ref="A%d:%s%d"'%(hdr,oref.group(1),newlast))
@@ -342,20 +505,30 @@ def main():
                 rep=parse_report(dl(t,e["path_lower"]))
                 for col,key,isnum in CREDIT: addm(cod,col,rep.get(key),isnum)
                 print(f"   bilancio {cod} letto")
-            new_orders={}
+            new_orders={}; clienti_report=set()
             for e in det:
                 espos,ordini=parse_dettaglio(dl(t,e["path_lower"]))
                 for cod,v in espos.items(): addm(cod,"Esposizione corrente (€)",v,True)
                 new_orders.update(ordini)
+                clienti_report |= set(espos.keys()) | {o["cli"] for o in ordini.values() if o.get("cli")}
                 print(f"   dettaglio: {len(espos)} esposizioni, {len(ordini)} ordini letti")
             if mupd:
                 xlsx=apply_master_credit(xlsx,mupd); print(f"   Master aggiornato: {len(mupd)} clienti (credito/esposizione).")
             if new_orders:
-                hdr,col,docs,last=read_vendite_layout(xlsx)
-                add={d:o for d,o in new_orders.items() if d not in docs and o.get("cli") in rows}
-                if add:
-                    xlsx,_=add_orders(xlsx,add,hdr,col,last); print(f"   Vendite: +{len(add)} ordini aperti nuovi.")
-                else: print("   Vendite: nessun ordine nuovo da aggiungere.")
+                hdr,col,last,stato=read_vendite_full(xlsx)
+                consegne,residui,nuovi,evasi=pianifica_vendite(new_orders,stato,set(rows.keys()),clienti_report)
+                # sicurezza: se il DETTAGLIO è parziale, non chiudere mezzo portafoglio
+                if len(evasi) > max(5, len(new_orders)//2):
+                    print(f"   ATTENZIONE: {len(evasi)} ordini risulterebbero evasi: DETTAGLIO forse incompleto, chiusure ignorate.")
+                    chiusi={e["doc"] for e in evasi}; evasi=[]
+                    consegne=[c for c in consegne if not (c.get("finale") and c["doc"] in chiusi)]
+                if consegne or residui or nuovi or evasi:
+                    xlsx,_=add_orders(xlsx,nuovi,hdr,col,last,consegne=consegne,residui=residui,evasi=evasi)
+                    tot_t=sum(c["kg"] for c in consegne)/1000; tot_e=sum(c["imp"] for c in consegne)
+                    print(f"   Vendite: +{len(nuovi)} ordini nuovi, +{len(consegne)} consegne "
+                          f"({tot_t:,.1f} t / {tot_e:,.2f} EUR).")
+                else:
+                    print("   Vendite: nessuna variazione da registrare.")
             ul(t,DBX,xlsx); print("crm-database.xlsx aggiornato.")
     day=datetime.date.today().isoformat()
     for e in files:

@@ -248,7 +248,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "14";
+const APP_VERSION = "16";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -270,6 +270,30 @@ function tclass(t){t=(t||"").toLowerCase();
   if(t.includes("caldo"))return"t-caldo";if(t.includes("raffred"))return"t-raffreddamento";
   if(t.includes("fermo"))return"t-fermo";if(t.includes("ex"))return"t-ex";if(t.includes("prospect"))return"t-prospect";return"";}
 
+// ---------- diagnosi backend (failsafe login) ----------
+// Interroga /health del Worker e traduce l'esito in una frase utile,
+// così un problema di accesso non richiede di aprire la console.
+async function diagnosi(box){
+  box.textContent="Diagnosi in corso…";
+  try{
+    const r=await fetch(API+"/health",{cache:'no-store'});
+    const t=await r.text();
+    let h=null; try{ h=JSON.parse(t); }catch(e){}
+    if(!h){ box.textContent="Il server risponde ma non con dati validi (HTTP "+r.status+"): il backend va ripubblicato."; return; }
+    const p=[];
+    if(h.session_secret!=="presente") p.push("manca la chiave di sessione");
+    if(!String(h.users_json||"").startsWith("ok")) p.push("elenco utenti non valido ("+h.users_json+")");
+    if(!String(h.dropbox||"").startsWith("ok")) p.push("Dropbox: "+h.dropbox);
+    if(h.dropbox_app_key!=="presente") p.push("manca la chiave Dropbox");
+    if(h.dropbox_refresh!=="presente") p.push("manca il token Dropbox");
+    box.textContent = p.length
+      ? "Problema sul server: "+p.join("; ")+". Serve intervento sulla configurazione."
+      : "Il server è a posto ("+h.users_json+"): il blocco è sulla tua rete o su un'estensione del browser. Prova in finestra anonima.";
+  }catch(e){
+    box.textContent="Il server non risponde affatto: rete, VPN o estensione del browser stanno bloccando le chiamate. Prova in finestra anonima o da rete mobile.";
+  }
+}
+
 // ---------- auth ----------
 document.getElementById('loginForm').addEventListener('submit', async (e)=>{
   e.preventDefault();
@@ -278,12 +302,29 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
   const btn=document.getElementById('loginBtn'); const err=document.getElementById('loginErr');
   btn.disabled=true; btn.textContent="Accesso…"; err.textContent="";
   try{
-    const r=await fetch(API+"/login",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({email,password})});
-    const j=await r.json();
+    let r;
+    try{
+      r=await fetch(API+"/login",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({email,password})});
+    }catch(neterr){
+      // la richiesta non è nemmeno partita/arrivata: rete, CORS, VPN o estensione che blocca
+      err.innerHTML="Server non raggiungibile ("+esc(neterr&&neterr.message?neterr.message:"rete")+
+        '). <a href="#" id="diag">Esegui diagnosi</a>';
+      const dl=document.getElementById('diag');
+      if(dl) dl.onclick=async(ev)=>{ ev.preventDefault(); await diagnosi(err); };
+      throw "handled";
+    }
+    const raw=await r.text();
+    let j=null; try{ j=JSON.parse(raw); }catch(e){}
+    if(j===null){
+      // il server ha risposto ma non con JSON: quasi sempre errore del Worker
+      err.textContent="Risposta non valida dal server (HTTP "+r.status+"). Riprova o avvisa Jacopo.";
+      console.error("Login: risposta non JSON", r.status, raw.slice(0,300));
+      throw "handled";
+    }
     if(r.ok && j.token){ TOKEN=j.token; localStorage.setItem('crm_token',TOKEN); localStorage.setItem('crm_user',j.email||email); await start(); }
-    else{ err.textContent = j.error==="credenziali non valide" ? "Email o password non corretti." : (j.error||"Accesso non riuscito."); }
-  }catch(ex){ err.textContent="Errore di rete. Riprova."; }
+    else{ err.textContent = j.error==="credenziali non valide" ? "Email o password non corretti." : (j.error||"Accesso non riuscito (HTTP "+r.status+")."); }
+  }catch(ex){ if(ex!=="handled"){ err.textContent="Errore imprevisto: "+(ex&&ex.message?ex.message:ex); } }
   btn.disabled=false; btn.textContent="Accedi";
 });
 document.getElementById('logout').onclick=()=>{ localStorage.removeItem('crm_token'); localStorage.removeItem('crm_user'); location.reload(); };
