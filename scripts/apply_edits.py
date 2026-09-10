@@ -38,9 +38,57 @@ ROUTE = {
  "indirizzo":("MAS","Indirizzo","str"), "comune":("MAS","Comune","str"),
  "provincia":("MAS","Provincia","str"), "regione":("MAS","Regione","str"),
  "owner":("MAS","Owner","str"),
+ # Calendario -> Registro. NB: nel Master queste colonne sono formule XLOOKUP che
+ # leggono dalla Pipeline: scriverle direttamente le distruggerebbe.
+ "cal_ultima":("REG","G","date"), "cal_esito":("REG","I","str"),
+ "cal_prossima":("REG","J","str"), "cal_followup":("REG","K","date"),
+ "cal_appuntamento":("MAS","Data appuntamento","date"),
 }
 NEW_PATH = "/nuovi.jsonl"
 NEW_ARCHIVE = "/nuovi-applied.jsonl"
+ATT_PATH = "/attivita.json"     # calendario: alimenta le date di contatto nel Master
+
+
+def campi_da_attivita(att):
+    """Dalle attività del calendario ricava, per ogni cliente, i campi del Master.
+
+    Il calendario è la fonte di verità per le date di contatto: qui si traducono
+    in colonne dell'anagrafica, così chi apre l'Excel vede le stesse informazioni
+    di chi lavora nell'app.
+    """
+    oggi = datetime.date.today().isoformat()
+    per = {}
+    for a in (att or {}).values():
+        cod = (a.get("codice") or "").strip()
+        if not cod or not a.get("data"):
+            continue
+        per.setdefault(cod, []).append(a)
+    out = {}
+    for cod, lista in per.items():
+        f = {}
+        fatte = sorted([a for a in lista if a.get("stato") == "fatta"], key=lambda x: x.get("data", ""))
+        futura = sorted([a for a in lista if a.get("stato") == "pianificata" and a.get("data", "") >= oggi],
+                        key=lambda x: x.get("data", ""))
+        if fatte:
+            u = fatte[-1]
+            f["cal_ultima"] = u["data"]
+            e = u.get("esito") or {}
+            testo = (e.get("testo") or "").strip()
+            segno = e.get("segno") or ""
+            riepilogo = f"{u.get('tipo','')}: {segno}" + (f" — {testo}" if testo else "")
+            if e.get("offerta"):
+                riepilogo += " [offerta presentata]"
+            f["cal_esito"] = riepilogo[:250]
+        if futura:
+            p = futura[0]
+            f["cal_followup"] = p["data"]
+            f["cal_prossima"] = (f"{p.get('tipo','')}" + (f" — {p.get('titolo')}" if p.get("titolo") else ""))[:120]
+            appunt = [a for a in futura if a.get("tipo") in ("appuntamento", "visita")]
+            if appunt:
+                f["cal_appuntamento"] = appunt[0]["data"]
+        if f:
+            out[cod] = f
+    return out
 
 def tok():
     r=requests.post(TOKEN_URL,data={"grant_type":"refresh_token","refresh_token":REFRESH,"client_id":APP_KEY},timeout=30)
@@ -217,15 +265,27 @@ def main():
     for l in lines:
         try: edits.append(json.loads(l))
         except: pass
-    if not lines and not newlines:
-        print("Nessuna modifica né nuovo cliente in coda."); return 0
+    # ---- 3. CALENDARIO: date di contatto derivate dalle attività ----
+    attRaw=dl_bytes(t,ATT_PATH)
+    try: att=json.loads(attRaw.decode("utf-8")) if attRaw else {}
+    except Exception: att=None
+    if att is None:
+        print("ATTENZIONE: attivita.json illeggibile, sincronizzazione calendario saltata."); att={}
+    da_att=campi_da_attivita(att)
+
+    if not lines and not newlines and not da_att:
+        print("Nessuna modifica, nuovo cliente o attività da riportare."); return 0
     n=len(lines)
     agg={}
+    # prima il calendario, poi le modifiche manuali: se qualcuno ha corretto un campo
+    # a mano nell'app, la sua modifica resta quella buona.
+    for cod,f in da_att.items(): agg.setdefault(cod,{}).update(f)
     for e in edits:
         cod=str(e.get("codice","")).strip()
         if not cod: continue
         agg.setdefault(cod,{}).update(e.get("fields",{}) or {})
-    print(f"In coda: {len(nuovi)} nuovi clienti, {len(agg)} clienti modificati ({n} eventi).")
+    print(f"In coda: {len(nuovi)} nuovi clienti, {len(agg)} clienti da aggiornare "
+          f"({n} modifiche manuali, {len(da_att)} da calendario).")
 
     xlsx=dl_bytes(t,DB_PATH)
     if not xlsx: print("ERRORE: database non trovato su Dropbox."); return 1

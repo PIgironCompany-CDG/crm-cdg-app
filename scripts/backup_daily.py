@@ -14,7 +14,8 @@ import os, json, datetime, sys, requests
 APP_KEY = os.environ["DROPBOX_APP_KEY"]
 REFRESH = os.environ["DROPBOX_REFRESH_TOKEN"]
 FILES = ["/crm-database.xlsx", "/snapshot.json", "/operativa.json", "/interazioni.json",
-         "/fornitori.json", "/notifiche.json", "/nuovi.jsonl", "/nuovi-applied.jsonl",
+         "/fornitori.json", "/notifiche.json", "/attivita.json",
+         "/nuovi.jsonl", "/nuovi-applied.jsonl",
          "/edits.jsonl", "/edits-applied.jsonl"]
 TOKEN_URL = "https://api.dropbox.com/oauth2/token"
 COPY_URL  = "https://api.dropboxapi.com/2/files/copy_v2"

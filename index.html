@@ -125,6 +125,48 @@
   .pill.task{background:#eef4ff}
   .ptag{display:inline-block;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mid);margin-bottom:4px}
   .plink{color:var(--blue);cursor:pointer;text-decoration:underline}
+  /* CALENDARIO */
+  .calbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 16px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:96px;z-index:3}
+  .calbar .sp{flex:1}
+  .calbar select{padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:14px}
+  .navbtn{background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-weight:700;color:var(--mid)}
+  .navbtn:hover{border-color:var(--sand)}
+  #calTitolo{font-size:16px;text-transform:capitalize}
+  .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{background:#fff;border:0;padding:7px 13px;font-size:13px;font-weight:600;color:var(--mid)}
+  .seg button.on{background:var(--dark);color:#fff}
+  .calwrap{padding:12px 16px 80px}
+  .cgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .cdow{background:var(--light);padding:7px 6px;font-size:11px;font-weight:800;color:var(--mid);text-transform:uppercase;text-align:center}
+  .cday{background:#fff;min-height:104px;padding:5px 5px 7px;position:relative}
+  .cday.fuori{background:#fafbfc}
+  .cday.oggi{background:#fffdf0;box-shadow:inset 0 0 0 2px #e6c34a}
+  .cday .n{font-size:12px;font-weight:700;color:var(--mid);margin-bottom:3px}
+  .cday.fuori .n{opacity:.4}
+  .cday .add{position:absolute;top:4px;right:5px;border:0;background:transparent;color:var(--mid);font-size:14px;opacity:0;padding:0 3px}
+  .cday:hover .add{opacity:.7}
+  .ev{display:block;width:100%;text-align:left;border:0;border-radius:6px;padding:3px 6px;margin-bottom:3px;font-size:11.5px;line-height:1.25;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ev.fatta{opacity:.55;text-decoration:line-through}
+  .ev.scaduta{box-shadow:inset 0 0 0 2px #c0392b}
+  .weekgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:10px}
+  .wcol{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px;min-height:180px}
+  .wcol h5{margin:0 0 6px;font-size:12px;color:var(--mid);text-transform:uppercase;letter-spacing:.03em}
+  .wcol.oggi{box-shadow:inset 0 0 0 2px #e6c34a}
+  .legenda{display:flex;gap:14px;flex-wrap:wrap;padding:0 16px 30px;font-size:12px;color:var(--mid)}
+  .legenda i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .alertbar{margin:12px 16px 0;padding:10px 14px;border-radius:10px;background:#fff2cc;border:1px solid #e6c34a;font-size:14px}
+  .alertbar b{cursor:pointer;text-decoration:underline}
+  .attrow{display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .attrow:last-child{border-bottom:0}
+  .attrow .when{min-width:96px;color:var(--mid);font-size:12px}
+  .attrow .badge2{font-size:10px;font-weight:800;text-transform:uppercase;padding:1px 6px;border-radius:10px;background:var(--light);color:var(--mid)}
+  .esito-pos{color:#1f8a4c;font-weight:700}.esito-neg{color:#c0392b;font-weight:700}.esito-neu{color:var(--mid);font-weight:700}
+  @media(max-width:700px){
+    .cday{min-height:74px}
+    .ev{font-size:10px;padding:2px 4px}
+    .weekgrid{grid-template-columns:1fr}
+    .calbar{top:auto;position:static}
+  }
   .pstrip{display:flex;gap:8px;overflow-x:auto;padding:12px 16px 0;-webkit-overflow-scrolling:touch}
   .pchip{flex:0 0 auto;background:#fff;border:1px solid var(--line);border-radius:20px;padding:6px 13px;font-size:13px;cursor:pointer;white-space:nowrap}
   .pchip.on{background:var(--dark);color:#fff;border-color:var(--dark)}
@@ -164,6 +206,7 @@
   <nav class="tabs">
     <button data-tab="clienti" class="on">Clienti</button>
     <button data-tab="fornitori">Fornitori</button>
+    <button data-tab="cal">Calendario <span id="badgeCal" class="badge hidden">0</span></button>
     <button data-tab="inbox">Inbox <span id="badge" class="badge hidden">0</span></button>
     <button data-tab="dash">Dashboard</button>
   </nav>
@@ -189,6 +232,23 @@
     <div class="count" id="countF"></div>
     <div class="grid" id="gridF"></div>
     <div class="empty hidden" id="emptyF">Nessun fornitore. Premi "+ Nuovo fornitore" per aggiungerne uno.</div>
+  </section>
+
+  <section id="tab-cal" class="hidden">
+    <div id="daEsitare" class="alertbar hidden"></div>
+    <div class="calbar">
+      <button id="calPrev" class="navbtn">‹</button>
+      <button id="calOggi" class="navbtn">Oggi</button>
+      <button id="calNext" class="navbtn">›</button>
+      <strong id="calTitolo"></strong>
+      <span class="sp"></span>
+      <div class="seg"><button id="vMese" class="on">Mese</button><button id="vSett">Settimana</button></div>
+      <select id="calOwner"><option value="">Tutti</option><option value="__me">Solo le mie</option></select>
+      <select id="calTipo"><option value="">Tutti i tipi</option><option>chiamata</option><option>appuntamento</option><option>visita</option><option>mail</option></select>
+      <button id="btnNuovaAtt" class="savepill">+ Attività</button>
+    </div>
+    <div id="calWrap" class="calwrap"></div>
+    <div class="legenda" id="calLeg"></div>
   </section>
 
   <section id="tab-inbox" class="hidden">
@@ -248,7 +308,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "16";
+const APP_VERSION = "17";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -263,6 +323,8 @@ let OPER = {};
 let INTER = {};
 let FORN = {};
 let NOTIF = [];
+let ATT = {};
+let USER = localStorage.getItem('crm_user')||"";
 let TIPO = "", PRESET = null, charts = {};
 
 function esc(s){return (s==null?"":String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -339,6 +401,8 @@ async function loadData(){
   INTER = j.interazioni || {};
   FORN = j.fornitori || {};
   NOTIF = j.notifiche || [];
+  ATT = j.attivita || {};
+  USER = (j.user||USER||"").toLowerCase();
   const byCode={}; (snap.clienti||[]).forEach(c=>{ byCode[c.codice]=Object.assign({},c); });
   // nuovi clienti creati dall'app e non ancora nel database
   (j.nuovi||[]).forEach(n=>{ if(n&&n.codice&&!byCode[n.codice]) byCode[n.codice]=Object.assign({status:"Prospect",stato_attivita:"Da fare"},n.fields||{}); });
@@ -410,6 +474,7 @@ function openDrawer(c){
       ${inp("data_followup","Data follow-up",c.data_followup,"date")}
       ${inp("stato_followup","Stato follow-up",c.stato_followup)}
     </div>
+    ${bloccoAttivita(c.codice)}
     <div class="sec"><h3>Note <button type="button" class="addbtn" onclick="showAdd('nota')">+ Aggiungi nota</button></h3>
       <div id="addbox-nota" class="addbox hidden"><textarea id="new-nota" class="fi" rows="2" placeholder="Scrivi una nota…"></textarea>
         <label class="fl">Menziona un collega (facoltativo)</label>${userSelect('assign-nota')}
@@ -617,6 +682,250 @@ async function addInter(tp){
   else alert('Errore nel salvataggio.');
 }
 
+// ================= CALENDARIO E ATTIVITÀ =================
+// Una sola entità "attività" alimenta sia il calendario sia la scheda cliente:
+// così una telefonata registrata da una parte compare subito anche nell'altra.
+const TIPI_ATT=["chiamata","appuntamento","visita","mail"];
+const COLORI=["#26578a","#1f8a4c","#8a6d00","#7d3c98","#c0392b"];
+function coloreUtente(email){
+  const i=UTENTI.indexOf(String(email||"").toLowerCase());
+  return COLORI[(i<0?UTENTI.length:i)%COLORI.length];
+}
+function nomeBreve(email){ return String(email||"").split("@")[0]; }
+let CAL_REF=new Date(); let CAL_VISTA="mese";
+const MESI=["gennaio","febbraio","marzo","aprile","maggio","giugno","luglio","agosto","settembre","ottobre","novembre","dicembre"];
+const DOW=["lun","mar","mer","gio","ven","sab","dom"];
+const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const oggiIso=()=>iso(new Date());
+function attList(){ return Object.values(ATT||{}); }
+function attFiltrate(){
+  const ow=document.getElementById('calOwner').value, tp=document.getElementById('calTipo').value;
+  return attList().filter(a=>{
+    if(tp && a.tipo!==tp) return false;
+    if(ow==="__me" && String(a.owner||"").toLowerCase()!==String(USER||"").toLowerCase()) return false;
+    if(ow && ow!=="__me" && a.owner!==ow) return false;
+    return true;
+  });
+}
+// attività concluse come orario ma ancora senza esito: è la coda "da esitare"
+function daEsitare(){
+  const ora=new Date();
+  return attList().filter(a=>{
+    if(a.stato!=="pianificata") return false;
+    if(String(a.owner||"").toLowerCase()!==String(USER||"").toLowerCase()) return false;
+    const fine=new Date((a.data||"")+"T"+((a.ora||"23:59"))+":00");
+    if(isNaN(fine)) return false;
+    return new Date(fine.getTime()+(a.durata_min||60)*60000) < ora;
+  }).sort((x,y)=>String(x.data).localeCompare(String(y.data)));
+}
+function renderDaEsitare(){
+  const box=document.getElementById('daEsitare'); if(!box) return;
+  const l=daEsitare(); const b=document.getElementById('badgeCal');
+  if(b){ b.textContent=l.length; b.classList.toggle('hidden', l.length===0); }
+  if(!l.length){ box.classList.add('hidden'); return; }
+  const p=l[0];
+  box.classList.remove('hidden');
+  box.innerHTML=`Hai ${l.length} attività da chiudere. La più vecchia: <b onclick="apriEsito('${p.id}')">`+
+    `${esc(p.tipo)} del ${esc(p.data)}${p.cliente?(" — "+esc(p.cliente)):""} · registra l'esito</b>`;
+}
+function eventoHTML(a){
+  const col=coloreUtente(a.owner);
+  const scad=(a.stato==="pianificata" && a.data<oggiIso());
+  const et=(a.ora?a.ora+" ":"")+(a.cliente||a.titolo||a.tipo);
+  return `<button class="ev ${a.stato==="fatta"?"fatta":""} ${scad?"scaduta":""}" style="background:${col}"
+    title="${escAttr((a.ora||"")+" "+(a.tipo||"")+" · "+(a.cliente||"")+" · "+nomeBreve(a.owner))}"
+    onclick="apriAtt('${a.id}')">${esc(et)}</button>`;
+}
+function renderCal(){
+  const wrap=document.getElementById('calWrap'); if(!wrap) return;
+  const tit=document.getElementById('calTitolo');
+  const per={}; attFiltrate().forEach(a=>{ (per[a.data]=per[a.data]||[]).push(a); });
+  Object.values(per).forEach(l=>l.sort((x,y)=>String(x.ora||"99").localeCompare(String(y.ora||"99"))));
+  if(CAL_VISTA==="mese"){
+    const y=CAL_REF.getFullYear(), m=CAL_REF.getMonth();
+    tit.textContent=`${MESI[m]} ${y}`;
+    const primo=new Date(y,m,1); let start=new Date(primo);
+    start.setDate(1-((primo.getDay()+6)%7));            // la settimana parte da lunedì
+    let h='<div class="cgrid">'+DOW.map(d=>`<div class="cdow">${d}</div>`).join("");
+    for(let i=0;i<42;i++){
+      const d=new Date(start); d.setDate(start.getDate()+i);
+      const k=iso(d), fuori=d.getMonth()!==m, oggi=(k===oggiIso());
+      h+=`<div class="cday ${fuori?'fuori':''} ${oggi?'oggi':''}">
+            <div class="n">${d.getDate()}</div>
+            <button class="add" title="Aggiungi" onclick="nuovaAtt('${k}')">+</button>
+            ${(per[k]||[]).map(eventoHTML).join("")}</div>`;
+      if(i>=34 && d.getMonth()!==m && (i+1)%7===0) break;
+    }
+    wrap.innerHTML=h+'</div>';
+  } else {
+    const d0=new Date(CAL_REF); d0.setDate(d0.getDate()-((d0.getDay()+6)%7));
+    const d6=new Date(d0); d6.setDate(d0.getDate()+6);
+    tit.textContent=`${d0.getDate()} ${MESI[d0.getMonth()].slice(0,3)} – ${d6.getDate()} ${MESI[d6.getMonth()].slice(0,3)} ${d6.getFullYear()}`;
+    let h='<div class="weekgrid">';
+    for(let i=0;i<7;i++){
+      const d=new Date(d0); d.setDate(d0.getDate()+i); const k=iso(d);
+      h+=`<div class="wcol ${k===oggiIso()?'oggi':''}">
+            <h5>${DOW[i]} ${d.getDate()} <button class="add" style="opacity:.6;float:right" onclick="nuovaAtt('${k}')">+</button></h5>
+            ${(per[k]||[]).map(eventoHTML).join("") || '<span class="pempty">—</span>'}</div>`;
+    }
+    wrap.innerHTML=h+'</div>';
+  }
+  document.getElementById('calLeg').innerHTML=
+    UTENTI.map(u=>`<span><i style="background:${coloreUtente(u)}"></i>${esc(nomeBreve(u))}</span>`).join("")+
+    '<span><i style="background:#fff;box-shadow:inset 0 0 0 2px #c0392b"></i>in ritardo</span>'+
+    '<span style="text-decoration:line-through">conclusa</span>';
+  renderDaEsitare();
+}
+function nuovaAtt(data,codice){ apriAtt(null,{data:data||oggiIso(),codice:codice||null}); }
+function apriAtt(id,pre){
+  const a=(id&&ATT[id])?ATT[id]:Object.assign({tipo:"chiamata",data:oggiIso(),ora:"09:00",durata_min:60,owner:USER},pre||{});
+  const isNew=!id;
+  const cli=DATA.map(c=>({cod:c.codice,rag:c.ragione})).sort((x,y)=>String(x.rag).localeCompare(String(y.rag)));
+  const d=document.getElementById('drawer'); CURRENT=null;
+  const sel=(idf,val,opts,lbl)=>`<label class="fl">${lbl}</label><select class="fi" id="${idf}">`+
+    opts.map(o=>`<option value="${escAttr(o.v)}"${o.v===(val||"")?" selected":""}>${esc(o.t)}</option>`).join("")+`</select>`;
+  const mio=(!a.owner || a.owner===USER || a.creatoDa===USER);
+  d.innerHTML=`<div class="dh"><button class="close" onclick="closeDrawer()">×</button>
+      <h2>${isNew?'Nuova attività':esc((a.tipo||'').toUpperCase()+' · '+(a.cliente||''))}</h2>
+      <div class="sub">${isNew?'Comparirà nel calendario e nella scheda cliente':'di '+esc(nomeBreve(a.owner))+(a.stato==='fatta'?' · conclusa':'')}</div></div>
+    <div class="sec">
+      ${sel('at_tipo',a.tipo,TIPI_ATT.map(t=>({v:t,t:t})),'Tipo')}
+      ${sel('at_cod',a.codice||"",[{v:"",t:"— nessun cliente —"}].concat(cli.map(c=>({v:c.cod,t:c.rag+" ("+c.cod+")"}))),'Cliente')}
+      <label class="fl">Oggetto</label><input class="fi" id="at_titolo" value="${escAttr(a.titolo||"")}" placeholder="Es. verifica fabbisogno Q4">
+      <div style="display:flex;gap:8px">
+        <div style="flex:1.2"><label class="fl">Data</label><input class="fi" id="at_data" type="date" value="${escAttr(a.data||"")}"></div>
+        <div style="flex:1"><label class="fl">Ora</label><input class="fi" id="at_ora" type="time" value="${escAttr(a.ora||"")}"></div>
+        <div style="flex:.9"><label class="fl">Durata</label><input class="fi" id="at_dur" type="number" min="15" step="15" value="${a.durata_min||60}"></div>
+      </div>
+      ${sel('at_owner',a.owner||USER,UTENTI.map(u=>({v:u,t:nomeBreve(u)})),'A cura di')}
+      <label class="fl">Luogo</label><input class="fi" id="at_luogo" value="${escAttr(a.luogo||"")}">
+      <label class="fl">Note</label><textarea class="fi" id="at_note" rows="3">${esc(a.note||"")}</textarea>
+    </div>
+    ${a.esito?`<div class="sec"><h3>Esito registrato</h3>
+      <div class="pill"><div class="ptext"><span class="esito-${a.esito.segno==='positivo'?'pos':(a.esito.segno==='negativo'?'neg':'neu')}">${esc(a.esito.segno)}</span> — ${esc(a.esito.testo||'nessuna nota')}
+      ${a.esito.offerta?'<br><b>Offerta presentata</b>'+(a.esito.offerta_note?': '+esc(a.esito.offerta_note):''):'<br>Nessuna offerta'}</div>
+      <div class="pmeta">registrato da ${esc(nomeBreve(a.esito.user))} · ${fmtTs(a.esito.ts)}</div></div></div>`:''}
+    <div class="savebar">
+      ${mio?`<button id="atBtn">${isNew?'Crea':'Salva'}</button>`:'<span class="pempty">Attività di un collega: sola lettura</span>'}
+      ${(!isNew && a.stato!=='fatta')?`<button class="cancelpill" onclick="apriEsito('${a.id}')">Registra esito</button>`:''}
+      ${(!isNew && mio)?`<button class="cancelpill" onclick="delAtt('${a.id}')">Elimina</button>`:''}
+      <span id="atMsg"></span></div>`;
+  const b=document.getElementById('atBtn');
+  if(b) b.onclick=()=>salvaAtt(id);
+  d.classList.add('open'); document.getElementById('ov').classList.add('open');
+}
+async function salvaAtt(id){
+  const g=i=>{const e=document.getElementById(i); return e?e.value:"";};
+  const cod=g('at_cod');
+  const fields={tipo:g('at_tipo'),codice:cod||null,
+    cliente:(DATA.find(c=>c.codice===cod)||{}).ragione||"",
+    titolo:g('at_titolo'),data:g('at_data'),ora:g('at_ora'),
+    durata_min:parseInt(g('at_dur')||"60",10),owner:g('at_owner'),
+    luogo:g('at_luogo'),note:g('at_note')};
+  const msg=document.getElementById('atMsg'), btn=document.getElementById('atBtn');
+  if(!fields.data){ msg.textContent="Serve una data."; return; }
+  btn.disabled=true; btn.textContent="Salvataggio…";
+  const {ok,j}=await apiPost('/attivita',{id:id||null,fields});
+  if(ok&&j.attivita){ ATT[j.attivita.id]=j.attivita; msg.textContent="Salvato ✓"; renderCal();
+    if(j.attivita.codice && CURRENT_COD===j.attivita.codice) {} setTimeout(closeDrawer,700); }
+  else { msg.textContent=(j&&j.error)||"Errore nel salvataggio."; btn.disabled=false; btn.textContent="Salva"; }
+}
+async function delAtt(id){
+  if(!confirm("Eliminare questa attività?")) return;
+  const {ok,j}=await apiPost('/attivita-delete',{id});
+  if(ok){ delete ATT[id]; closeDrawer(); renderCal(); } else alert((j&&j.error)||"Errore.");
+}
+// Chiusura dell'attività: esito + se è stata fatta un'offerta + eventuale prossimo passo
+function apriEsito(id){
+  const a=ATT[id]; if(!a) return;
+  const d=document.getElementById('drawer');
+  d.innerHTML=`<div class="dh"><button class="close" onclick="closeDrawer()">×</button>
+      <h2>Esito · ${esc(a.tipo||'')}</h2>
+      <div class="sub">${esc(a.cliente||'senza cliente')} · ${esc(a.data)}${a.ora?' '+esc(a.ora):''}</div></div>
+    <div class="sec"><h3>Com'è andata</h3>
+      <label class="fl">Esito</label>
+      <select class="fi" id="es_segno"><option value="positivo">Positivo</option><option value="neutro" selected>Neutro</option><option value="negativo">Negativo</option></select>
+      <label class="fl">Cosa è emerso</label><textarea class="fi" id="es_testo" rows="4" placeholder="Sintesi della chiamata o dell'incontro…"></textarea>
+    </div>
+    <div class="sec"><h3>Offerta</h3>
+      <label class="fl"><input type="checkbox" id="es_off" style="width:auto;margin-right:6px">È stata presentata un'offerta</label>
+      <textarea class="fi" id="es_offnote" rows="2" placeholder="Qualità, tonnellaggio, prezzo, validità…"></textarea>
+    </div>
+    <div class="sec"><h3>Prossimo passo (facoltativo)</h3>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1"><label class="fl">Tipo</label><select class="fi" id="es_ptipo"><option value="">— nessuno —</option>${TIPI_ATT.map(t=>`<option>${t}</option>`).join("")}</select></div>
+        <div style="flex:1"><label class="fl">Quando</label><input class="fi" id="es_pdata" type="date"></div>
+        <div style="flex:.8"><label class="fl">Ora</label><input class="fi" id="es_pora" type="time" value="09:00"></div>
+      </div>
+    </div>
+    <div class="savebar"><button id="esBtn">Registra esito</button><span id="esMsg"></span></div>`;
+  document.getElementById('esBtn').onclick=async()=>{
+    const g=i=>{const e=document.getElementById(i); return e?e.value:"";};
+    const btn=document.getElementById('esBtn'), msg=document.getElementById('esMsg');
+    btn.disabled=true; btn.textContent="Salvataggio…";
+    const pt=g('es_ptipo'), pd=g('es_pdata');
+    const {ok,j}=await apiPost('/attivita-esito',{id,testo:g('es_testo'),segno:g('es_segno'),
+      offerta:document.getElementById('es_off').checked,offerta_note:g('es_offnote'),
+      prossimo:(pt&&pd)?{tipo:pt,data:pd,ora:g('es_pora')}:null});
+    if(ok&&j.attivita){
+      ATT[j.attivita.id]=j.attivita; if(j.creata) ATT[j.creata.id]=j.creata;
+      if(j.attivita.codice){ await ricaricaInter(); }
+      msg.textContent="Registrato ✓"; renderCal(); setTimeout(closeDrawer,700);
+    } else { msg.textContent=(j&&j.error)||"Errore."; btn.disabled=false; btn.textContent="Registra esito"; }
+  };
+  d.classList.add('open'); document.getElementById('ov').classList.add('open');
+}
+async function ricaricaInter(){
+  try{ const r=await fetch(API+"/data",{headers:{"Authorization":"Bearer "+TOKEN}});
+    if(r.ok){ const j=await r.json(); INTER=j.interazioni||INTER; } }catch(e){}
+}
+// attività di un cliente, per la scheda
+function attCliente(cod){
+  return attList().filter(a=>a.codice===cod)
+    .sort((x,y)=>String(y.data+(y.ora||"")).localeCompare(String(x.data+(x.ora||""))));
+}
+function bloccoAttivita(cod){
+  const l=attCliente(cod);
+  const fut=l.filter(a=>a.stato==="pianificata"), pas=l.filter(a=>a.stato!=="pianificata");
+  const riga=a=>{
+    const e=a.esito;
+    return `<div class="attrow">
+      <div class="when">${esc(a.data)}${a.ora?"<br>"+esc(a.ora):""}</div>
+      <div style="flex:1">
+        <span class="badge2">${esc(a.tipo)}</span> ${esc(a.titolo||"")}
+        <div class="pmeta">${esc(nomeBreve(a.owner))}${a.luogo?" · "+esc(a.luogo):""}</div>
+        ${e?`<div style="margin-top:4px"><span class="esito-${e.segno==='positivo'?'pos':(e.segno==='negativo'?'neg':'neu')}">${esc(e.segno)}</span>${e.testo?" — "+esc(e.testo):""}${e.offerta?" <b>· offerta presentata</b>":""}</div>`:""}
+      </div>
+      <div class="pacts"><button title="Apri" onclick="apriAtt('${a.id}')">✎</button>
+        ${a.stato==='pianificata'?`<button title="Registra esito" onclick="apriEsito('${a.id}')">✓</button>`:''}</div>
+    </div>`;
+  };
+  return `<div class="sec"><h3>Attività
+      <button type="button" class="addbtn" onclick="nuovaAtt(null,'${esc(cod)}')">+ Chiamata / appuntamento</button></h3>
+    ${fut.length?'<div class="pcat">In programma</div>'+fut.map(riga).join(""):''}
+    ${pas.length?'<div class="pcat">Storico</div>'+pas.slice(0,8).map(riga).join(""):''}
+    ${(!fut.length&&!pas.length)?'<span class="pempty">Nessuna attività registrata.</span>':''}</div>`;
+}
+function popolaOwnerCal(){
+  const s=document.getElementById('calOwner'); if(!s) return;
+  const cur=s.value;
+  s.innerHTML='<option value="">Tutti</option><option value="__me">Solo le mie</option>'+
+    UTENTI.map(u=>`<option value="${escAttr(u)}">${esc(nomeBreve(u))}</option>`).join("");
+  s.value=cur||"";
+}
+function spostaCal(v){
+  if(CAL_VISTA==="mese") CAL_REF.setMonth(CAL_REF.getMonth()+v);
+  else CAL_REF.setDate(CAL_REF.getDate()+7*v);
+  renderCal();
+}
+document.getElementById('calPrev').onclick=()=>spostaCal(-1);
+document.getElementById('calNext').onclick=()=>spostaCal(1);
+document.getElementById('calOggi').onclick=()=>{ CAL_REF=new Date(); renderCal(); };
+document.getElementById('vMese').onclick=function(){ CAL_VISTA="mese"; this.classList.add('on'); document.getElementById('vSett').classList.remove('on'); renderCal(); };
+document.getElementById('vSett').onclick=function(){ CAL_VISTA="sett"; this.classList.add('on'); document.getElementById('vMese').classList.remove('on'); renderCal(); };
+document.getElementById('btnNuovaAtt').onclick=()=>nuovaAtt();
+['calOwner','calTipo'].forEach(i=>document.getElementById(i).addEventListener('change',renderCal));
+
 // ---------- INBOX (menzioni e task assegnati) ----------
 const UTENTI=["francesco@pigironcompany.com","f.mastropasqua@pigironcompany.com","j.scarparo@pigironcompany.com",
               "marta@pigironcompany.com","tommaso@compagniacommerciale.eu"];
@@ -692,11 +1001,13 @@ document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('on',x===b));
   document.getElementById('tab-clienti').classList.toggle('hidden', b.dataset.tab!=='clienti');
   document.getElementById('tab-fornitori').classList.toggle('hidden', b.dataset.tab!=='fornitori');
+  document.getElementById('tab-cal').classList.toggle('hidden', b.dataset.tab!=='cal');
   document.getElementById('tab-inbox').classList.toggle('hidden', b.dataset.tab!=='inbox');
   document.getElementById('tab-dash').classList.toggle('hidden', b.dataset.tab!=='dash');
   if(b.dataset.tab==='dash') renderDash();
   if(b.dataset.tab==='fornitori') renderForn();
   if(b.dataset.tab==='inbox') renderInbox();
+  if(b.dataset.tab==='cal') renderCal();
 });
 // sotto-tab dashboard
 document.querySelectorAll('.dsub button').forEach(b=>b.onclick=()=>{
@@ -856,6 +1167,8 @@ async function start(){
   render();
   renderForn();
   renderInbox();
+  popolaOwnerCal();
+  renderCal();
 }
 
 // avvio: se ho un token valido, entro; altrimenti login
