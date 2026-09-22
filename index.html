@@ -366,7 +366,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "26";
+const APP_VERSION = "27";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -389,8 +389,8 @@ let CBAMIMP = {};
 let CBAM = { prezzo_certificato:75.28, benchmark:{A:1.089,B:1.210},
   maggiorazione:{"2026":0.10,"2027":0.20,"2028":0.30,"2029":0.30,"2030":0.30,"2031":0.30,"2032":0.30,"2033":0.30,"2034":0.30},
   fattore:{"2026":0.975,"2027":0.95,"2028":0.90,"2029":0.775,"2030":0.515,"2031":0.39,"2032":0.265,"2033":0.14,"2034":0},
-  origini:{ "BRASILE":{valore_predefinito:1.478}, "RUSSIA":{valore_predefinito:3.325},
-            "UCRAINA":{valore_predefinito:2.320}, "UE":{valore_predefinito:0} } };
+  origini:{ "BRASILE":{valore_predefinito:1.478}, "RUSSIA":{valore_predefinito:3.040},
+            "UCRAINA":{valore_predefinito:2.173}, "UE":{valore_predefinito:0} } };
 let USER = localStorage.getItem('crm_user')||"";
 let TIPO = "", PRESET = null, charts = {};
 
@@ -822,7 +822,7 @@ function cbamDettaglio(origine,anno,verificati,prezzo){
   }
   if(bm==null) return null;
   const emiss=base*(1+maggApplicata);
-  const detr=bm*fatt;
+  const detr=bm*fatt*(C.cscf!=null?C.cscf:1);
   const netto=Math.max(emiss-detr,0);
   return {base,magg:maggApplicata,fatt,bm,emiss,detr,netto,eur_t:netto*prezzo,
           ipotesi:verificati&&o.emissioni_verificate==null};
@@ -941,9 +941,35 @@ function renderCbamDich(){
       <p class="hint">Proiezione su ${tons(rf.volume_annuo_riferimento_t||0)} di origine brasiliana, a prezzo del certificato costante.
         La percentuale di anticipo va confermata sulla normativa vigente prima di usarla per impegni finanziari.</p>
     </div>
+    ${(DB.azioni_aperte&&DB.azioni_aperte.length)?`<div class="chartbox wide"><h4>Azioni aperte</h4>
+      <table class="st">${DB.azioni_aperte.map(a=>`<tr>
+        <td style="width:70px"><span class="badge2" style="background:${a.priorita==='Alta'?'#fdecea':(a.priorita==='Media'?'#fff2cc':'#eef1f4')};color:${a.priorita==='Alta'?'#c0392b':'#5c6672'}">${esc(a.priorita)}</span></td>
+        <td>${esc(a.azione)}</td></tr>`).join("")}</table>
+    </div>`:''}
+    ${DB.vincoli_verifica?`<div class="chartbox wide"><h4>Finestra della verifica</h4>
+      <div class="kv">
+        <div class="k">Accreditamenti verificatori</div><div>${esc(DB.vincoli_verifica.accreditamenti_disponibili||'—')}</div>
+        <div class="k">Primi rapporti emissibili</div><div>${esc(DB.vincoli_verifica.primi_rapporti_emissibili||'—')}</div>
+        <div class="k">Termine utile per il rapporto</div><div><b>${esc(DB.vincoli_verifica.termine_utile_rapporto||'—')}</b></div>
+      </div>
+      ${DB.vincoli_verifica.nota?`<p class="hint">${esc(DB.vincoli_verifica.nota)}</p>`:''}
+    </div>`:''}
     ${scad.length?`<div class="chartbox wide"><h4>Scadenze</h4>
-      <table class="st">${scad.map(s=>`<tr><td style="width:120px"><b>${esc(s.data)}</b></td><td>${esc(s.descrizione)}</td></tr>`).join("")}</table>
-    </div>`:''}`;
+      <table class="st">${scad.map(s=>{
+        const passata=s.data<new Date().toISOString().slice(0,10);
+        return `<tr${passata?' style="opacity:.5"':''}><td style="width:120px"><b>${esc(s.data)}</b></td><td>${esc(s.descrizione)}</td></tr>`;
+      }).join("")}</table>
+    </div>`:''}
+    <div class="chartbox wide"><h4>Costo per origine, ${anno}</h4>
+      <table class="st"><tr><th>Origine</th><th class="num">tCO2e/t</th><th class="num">€/t di ghisa</th></tr>
+      ${Object.entries(C.origini||{}).map(([o,v])=>{
+        const d=cbamDettaglio(o,anno,false,prezzo);
+        return {o,vp:v.valore_predefinito,eur:d?d.eur_t:0};
+      }).sort((a,b)=>a.eur-b.eur).map(r=>`<tr${r.o==='BRASILE'?' style="font-weight:700"':''}>
+        <td>${esc(r.o)}</td><td class="num">${eurF(r.vp,3)}</td><td class="num">${eurF(r.eur)}</td></tr>`).join("")}
+      </table>
+      <p class="hint">Senza origine dimostrabile si applica il valore dell'allegato IV: è la ragione per cui documentare la provenienza vale di per sé centinaia di euro a tonnellata.</p>
+    </div>`;
 }
 function renderCbam(){ renderCbamCalc(); renderCbamDich(); }
 document.querySelectorAll('#tab-cbam .dsub button').forEach(b=>b.onclick=()=>{

@@ -229,8 +229,8 @@ CBAM_FALLBACK = {
                       "2031":0.30,"2032":0.30,"2033":0.30,"2034":0.30},
     "fattore": {"2026":0.975,"2027":0.95,"2028":0.90,"2029":0.775,"2030":0.515,
                 "2031":0.39,"2032":0.265,"2033":0.14,"2034":0},
-    "origini": {"BRASILE":{"valore_predefinito":1.478},"RUSSIA":{"valore_predefinito":3.325},
-                "UCRAINA":{"valore_predefinito":2.320},"UE":{"valore_predefinito":0}},
+    "origini": {"BRASILE":{"valore_predefinito":1.478},"RUSSIA":{"valore_predefinito":3.040},
+                "UCRAINA":{"valore_predefinito":2.173},"UE":{"valore_predefinito":0}},
 }
 
 def blocco_cbam(xlsx_bytes, cfg, anno):
