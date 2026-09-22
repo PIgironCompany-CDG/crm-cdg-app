@@ -206,6 +206,7 @@
   <nav class="tabs">
     <button data-tab="clienti" class="on">Clienti</button>
     <button data-tab="fornitori">Fornitori</button>
+    <button data-tab="off">Offerte</button>
     <button data-tab="cal">Calendario <span id="badgeCal" class="badge hidden">0</span></button>
     <button data-tab="inbox">Inbox <span id="badge" class="badge hidden">0</span></button>
     <button data-tab="dash">Dashboard</button>
@@ -232,6 +233,15 @@
     <div class="count" id="countF"></div>
     <div class="grid" id="gridF"></div>
     <div class="empty hidden" id="emptyF">Nessun fornitore. Premi "+ Nuovo fornitore" per aggiungerne uno.</div>
+  </section>
+
+  <section id="tab-off" class="hidden">
+    <div style="padding:12px 16px 0"><button id="btnNuovaOff" class="savepill">+ Nuova offerta</button></div>
+    <div class="bar"><input type="search" id="qo" placeholder="Cerca per cliente, numero, qualità…">
+      <select id="fStatoOff"><option value="">Tutti gli stati</option><option>bozza</option><option>inviata</option><option>accettata</option><option>persa</option></select></div>
+    <div class="count" id="countO"></div>
+    <div class="grid" id="gridO"></div>
+    <div class="empty hidden" id="emptyO">Nessuna offerta. Premi "+ Nuova offerta" per crearne una.</div>
   </section>
 
   <section id="tab-cal" class="hidden">
@@ -308,7 +318,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "17";
+const APP_VERSION = "19";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -324,6 +334,12 @@ let INTER = {};
 let FORN = {};
 let NOTIF = [];
 let ATT = {};
+let OFF = {};
+let CBAM = { prezzo_certificato:75.28, benchmark:{A:1.089,B:1.210},
+  maggiorazione:{"2026":0.10,"2027":0.20,"2028":0.30,"2029":0.30,"2030":0.30,"2031":0.30,"2032":0.30,"2033":0.30,"2034":0.30},
+  fattore:{"2026":0.975,"2027":0.95,"2028":0.90,"2029":0.775,"2030":0.515,"2031":0.39,"2032":0.265,"2033":0.14,"2034":0},
+  origini:{ "BRASILE":{valore_predefinito:1.478}, "RUSSIA":{valore_predefinito:3.325},
+            "UCRAINA":{valore_predefinito:2.320}, "UE":{valore_predefinito:0} } };
 let USER = localStorage.getItem('crm_user')||"";
 let TIPO = "", PRESET = null, charts = {};
 
@@ -402,6 +418,8 @@ async function loadData(){
   FORN = j.fornitori || {};
   NOTIF = j.notifiche || [];
   ATT = j.attivita || {};
+  OFF = j.offerte || {};
+  CBAM = j.cbam || CBAM;
   USER = (j.user||USER||"").toLowerCase();
   const byCode={}; (snap.clienti||[]).forEach(c=>{ byCode[c.codice]=Object.assign({},c); });
   // nuovi clienti creati dall'app e non ancora nel database
@@ -474,6 +492,7 @@ function openDrawer(c){
       ${inp("data_followup","Data follow-up",c.data_followup,"date")}
       ${inp("stato_followup","Stato follow-up",c.stato_followup)}
     </div>
+    ${bloccoOfferte(c.codice)}
     ${bloccoAttivita(c.codice)}
     <div class="sec"><h3>Note <button type="button" class="addbtn" onclick="showAdd('nota')">+ Aggiungi nota</button></h3>
       <div id="addbox-nota" class="addbox hidden"><textarea id="new-nota" class="fi" rows="2" placeholder="Scrivi una nota…"></textarea>
@@ -681,6 +700,341 @@ async function addInter(tp){
   }
   else alert('Errore nel salvataggio.');
 }
+
+// ================= OFFERTE =================
+// Il conteggio riproduce il foglio "Conteggio PREZZI.xlsx" voce per voce: chi lo compila
+// ritrova le stesse righe che usa in Excel. Il CBAM, che lì non c'era, viene calcolato
+// dai parametri ufficiali e confrontato col margine: è il controllo che prima mancava.
+const VOCI_COSTO=[
+  ["costo_cif","Costo CIF ($/t)",true],
+  ["cambio","Cambio $/€",true],
+  ["dazio","Dazio (€/t)",true],
+  ["sbarco","Sbarco (€/t)",true],
+  ["doganali","Doganali (€/t)",true],
+  ["spedizioniere","Spedizioniere (€/t)",true],
+  ["sped_doganale","Spedizioniere doganale (€/t)",true],
+  ["draft","Draft / pesatura (€/t)",true],
+  ["calo_pc","Calo peso (%)",true],
+  ["trasporto","Trasporto in fonderia (€/t)",true],
+  ["fin_stock","Finanziamento stock (€/t)",true],
+  ["assicurazione","Costo assicurazione (€/t)",true],
+  ["commissioni","Commissioni (€/t)",true],
+  ["spese_banc","Spese bancarie (€/t)",true],
+  ["tasso_viaggio","Tasso viaggio e $ (%)",true],
+  ["tasso_pagamento","Tasso pagamento e sosta (%)",true],
+  ["gg_viaggio","Giorni viaggio",true],
+  ["gg_giacenza","Giorni giacenza merce",true],
+  ["gg_pagamento","Giorni pagamento",true],
+  ["comm_incasso","Commissione di incasso (€/t)",true]
+];
+const DEFAULT_OFF={costo_cif:0,cambio:1.15,dazio:0,sbarco:6.5,doganali:0.88,spedizioniere:0.35,
+  sped_doganale:0.15,draft:0.05,calo_pc:0,trasporto:0,fin_stock:2,assicurazione:0,commissioni:2,
+  spese_banc:0,tasso_viaggio:5,tasso_pagamento:3.5,gg_viaggio:30,gg_giacenza:30,gg_pagamento:30,
+  comm_incasso:0,quantita:0,prezzo_vendita:0,qualita:"",origine:"BRASILE",resa:"FCA Porto di Marghera",
+  consegna:"Come da Vs. richiesta",pagamento:"Vs. Solito",cbam_manuale:null};
+const valNum=v=>{const n=parseFloat(String(v==null?"":v).replace(",",".")); return isNaN(n)?0:n;};
+const eurF=(v,d)=>Number(v||0).toLocaleString('it-IT',{minimumFractionDigits:d==null?2:d,maximumFractionDigits:d==null?2:d});
+
+// Costo CBAM per tonnellata:
+// (valore predefinito x maggiorazione − benchmark x fattore anno) x prezzo certificato
+// Quando si dichiara con i VALORI PREDEFINITI si usa il benchmark colonna B (1,210);
+// la colonna A (1,089) vale solo con dati di emissione effettivi e verificati.
+// Con la colonna B il calcolo restituisce i 33,6 EUR/t comunicati ai clienti per il 2026.
+function calcolaCbam(origine,anno,datiVerificati){
+  const C=CBAM||{}; const o=(C.origini||{})[String(origine||"").toUpperCase()];
+  if(!o) return {eur_t:0, dettaglio:"origine non mappata: CBAM non calcolabile"};
+  const y=String(anno||new Date().getFullYear());
+  const magg=(C.maggiorazione||{})[y]; const fatt=(C.fattore||{})[y];
+  const bm=(C.benchmark||{})[datiVerificati?"A":"B"];
+  const prezzo=C.prezzo_certificato||0;
+  if(magg==null||fatt==null) return {eur_t:0, dettaglio:"anno "+y+" non previsto nei parametri"};
+  const emiss=o.valore_predefinito*(1+magg);
+  const netto=Math.max(emiss-bm*fatt,0);
+  const costo=netto*prezzo;
+  return {eur_t:costo, emiss, netto,
+    dettaglio:`${o.valore_predefinito} tCO2e/t +${Math.round(magg*100)}% = ${emiss.toFixed(3)} · `+
+              `benchmark ${bm} x ${Math.round(fatt*1000)/10}% = ${(bm*fatt).toFixed(3)} · `+
+              `netto ${netto.toFixed(3)} x ${eurF(prezzo)} EUR`};
+}
+function conteggio(o){
+  const cif_eur = valNum(o.cambio)>0 ? valNum(o.costo_cif)/valNum(o.cambio) : 0;
+  const dazio = valNum(o.dazio);          // importo €/t, come nei conteggi esistenti
+  const sbarcoTot = valNum(o.sbarco)+valNum(o.doganali)+valNum(o.spedizioniere)+valNum(o.sped_doganale)+valNum(o.draft);
+  const tot1 = cif_eur+dazio+sbarcoTot;
+  const calo = tot1*valNum(o.calo_pc)/100;
+  const tot2 = tot1+calo;
+  const tot3 = tot2+valNum(o.trasporto)+valNum(o.fin_stock)+valNum(o.assicurazione)+valNum(o.commissioni)+valNum(o.spese_banc);
+  // Interessi come nel foglio Conteggio PREZZI: anno commerciale di 360 giorni,
+  // tasso viaggio sui giorni di viaggio, tasso pagamento su giacenza + giorni di pagamento.
+  const iv = tot3*valNum(o.tasso_viaggio)*valNum(o.gg_viaggio)/36000;
+  const ip = tot3*valNum(o.tasso_pagamento)*(valNum(o.gg_giacenza)+valNum(o.gg_pagamento))/36000;
+  const interessi = iv+ip;
+  const costo_tot = tot3+interessi+valNum(o.comm_incasso);
+  const prezzo = valNum(o.prezzo_vendita);
+  const margine = prezzo-costo_tot;
+  const margine_pc = costo_tot>0 ? margine/costo_tot*100 : 0;
+  const gg_tot = valNum(o.gg_viaggio)+valNum(o.gg_giacenza)+valNum(o.gg_pagamento);
+  const ritorno = gg_tot>0 ? margine_pc*365/gg_tot : 0;
+  return {cif_eur,dazio,sbarcoTot,tot1,calo,tot2,tot3,interessi,costo_tot,margine,margine_pc,ritorno};
+}
+function offList(){ return Object.values(OFF||{}); }
+function renderOff(){
+  const q=(document.getElementById('qo').value||'').toLowerCase();
+  const st=document.getElementById('fStatoOff').value;
+  const g=document.getElementById('gridO'); g.innerHTML=""; let n=0;
+  offList().filter(o=>{
+    if(st && o.stato!==st) return false;
+    if(q){const b=((o.cliente||"")+" "+(o.numero||"")+" "+(o.qualita||"")+" "+(o.origine||"")).toLowerCase(); if(!b.includes(q)) return false;}
+    return true;
+  }).sort((a,b)=>String(b.creatoTs||"").localeCompare(String(a.creatoTs||""))).forEach(o=>{
+    n++; const c=conteggio(o);
+    const cb=o.cbam_manuale!=null?valNum(o.cbam_manuale):calcolaCbam(o.origine,new Date(o.data||Date.now()).getFullYear(),false).eur_t;
+    const d=document.createElement('div'); d.className="card"; d.onclick=()=>apriOff(o.id);
+    d.innerHTML=`<div class="top"><div><div class="rag">${esc(o.cliente||'(senza cliente)')}</div>
+        <div class="meta">${esc(o.numero||'')} · ${esc(o.data||'')}</div></div>
+        <span class="tag ${o.stato==='accettata'?'t-caldo':(o.stato==='persa'?'t-fermo':(o.stato==='inviata'?'t-prospect':'t-ex'))}">${esc(o.stato||'bozza')}</span></div>
+      <div class="row"><b>${esc(o.qualita||'—')}</b> ${esc(o.origine||'')} · ${eurF(o.quantita,0)} t</div>
+      <div class="row">Prezzo <b>${eurF(o.prezzo_vendita)} €/t</b> · margine
+        <b style="color:${c.margine>0?'#1f8a4c':'#c0392b'}">${eurF(c.margine)} €/t</b></div>
+      <div class="row">+ CBAM ${eurF(cb)} €/t · al cliente <b>${eurF(valNum(o.prezzo_vendita)+cb)} €/t</b></div>`;
+    g.appendChild(d);
+  });
+  document.getElementById('countO').textContent=`${n} offerte`;
+  document.getElementById('emptyO').classList.toggle('hidden', n>0);
+}
+function apriOff(id){
+  const o=(id&&OFF[id])?Object.assign({},DEFAULT_OFF,OFF[id]):Object.assign({},DEFAULT_OFF,
+    {data:oggiIso(),validita:"",owner:USER});
+  const isNew=!id;
+  const cli=DATA.map(c=>({cod:c.codice,rag:c.ragione})).sort((x,y)=>String(x.rag).localeCompare(String(y.rag)));
+  const qualita=["SFEROIDALE P40","EMATITE","NODULARE","AFFINAZIONE","SPECIALE"];
+  const origini=Object.keys((CBAM&&CBAM.origini)||{});
+  const d=document.getElementById('drawer'); CURRENT=null;
+  const inp=(k,l,v,t)=>`<label class="fl">${l}</label><input class="fi" id="of_${k}" type="${t||'text'}" value="${escAttr(v==null?'':v)}">`;
+  const selv=(k,l,v,opts)=>`<label class="fl">${l}</label><select class="fi" id="of_${k}">`+
+    opts.map(x=>`<option value="${escAttr(x)}"${String(x)===String(v||"")?" selected":""}>${esc(x)}</option>`).join("")+`</select>`;
+  d.innerHTML=`<div class="dh"><button class="close" onclick="closeDrawer()">×</button>
+      <h2>${isNew?'Nuova offerta':esc(o.numero||'Offerta')}</h2>
+      <div class="sub">${isNew?'Compila il conteggio: il margine si aggiorna da solo':esc(o.cliente||'')+' · '+esc(o.stato||'')}</div></div>
+    <div class="sec"><h3>Intestazione</h3>
+      ${selv('codice','Cliente',o.codice,[""].concat(cli.map(c=>c.cod)).map(c=>c))}
+      <label class="fl">Referente (a chi è indirizzata)</label><input class="fi" id="of_referente" value="${escAttr(o.referente||'')}">
+      ${selv('qualita','Materiale',o.qualita,qualita)}
+      ${selv('origine','Origine',o.origine,origini)}
+      ${inp('quantita','Quantità (t)',o.quantita,'number')}
+      ${inp('resa','Resa',o.resa)}
+      ${inp('consegna','Consegna',o.consegna)}
+      ${inp('pagamento','Pagamento',o.pagamento)}
+      ${inp('data','Data offerta',o.data,'date')}
+      ${inp('validita','Valida fino al',o.validita,'date')}
+      ${inp('validita_ora','Ora validità',o.validita_ora||'12:00','time')}
+    </div>
+    <div class="sec"><h3>Conteggio costi</h3>
+      ${VOCI_COSTO.map(v=>inp(v[0],v[1],o[v[0]],'number')).join("")}
+    </div>
+    <div class="sec"><h3>Prezzo e margine</h3>
+      ${inp('prezzo_vendita','Prezzo di vendita (€/t)',o.prezzo_vendita,'number')}
+      <div id="of_riepilogo"></div>
+    </div>
+    <div class="sec"><h3>CBAM</h3>
+      <div id="of_cbam"></div>
+      ${inp('cbam_manuale','Forza un valore CBAM (€/t) — lascia vuoto per il calcolo automatico',o.cbam_manuale)}
+      ${inp('cbam_certificato','Costo certificato ETS dichiarato al cliente (€)',o.cbam_certificato||80)}
+    </div>
+    <div class="sec"><h3>Note interne</h3><textarea class="fi" id="of_note" rows="2">${esc(o.note||'')}</textarea></div>
+    <div class="savebar">
+      <button id="ofBtn">${isNew?'Crea offerta':'Salva'}</button>
+      ${!isNew?`<button class="cancelpill" onclick="stampaOff('${id}')">Anteprima e PDF</button>`:''}
+      ${!isNew?`<button class="cancelpill" onclick="delOff('${id}')">Elimina</button>`:''}
+      <span id="ofMsg"></span></div>`;
+  document.getElementById('ofBtn').onclick=()=>salvaOff(id);
+  // ricalcolo dal vivo a ogni modifica
+  VOCI_COSTO.map(v=>v[0]).concat(['prezzo_vendita','origine','data','cbam_manuale','quantita'])
+    .forEach(k=>{const el=document.getElementById('of_'+k); if(el) el.addEventListener('input',aggiornaRiepilogo);});
+  aggiornaRiepilogo();
+  d.classList.add('open'); document.getElementById('ov').classList.add('open');
+}
+function leggiOff(){
+  const g=k=>{const e=document.getElementById('of_'+k); return e?e.value:"";};
+  const o={};
+  VOCI_COSTO.forEach(v=>o[v[0]]=valNum(g(v[0])));
+  ['codice','referente','qualita','origine','resa','consegna','pagamento','data','validita','validita_ora','note'].forEach(k=>o[k]=g(k));
+  o.quantita=valNum(g('quantita')); o.prezzo_vendita=valNum(g('prezzo_vendita'));
+  o.cbam_certificato=valNum(g('cbam_certificato'));
+  const cm=g('cbam_manuale'); o.cbam_manuale=(cm===""||cm==null)?null:valNum(cm);
+  o.cliente=(DATA.find(c=>c.codice===o.codice)||{}).ragione||"";
+  return o;
+}
+function aggiornaRiepilogo(){
+  const o=leggiOff(); const c=conteggio(o);
+  const anno=new Date(o.data||Date.now()).getFullYear();
+  const cbA=calcolaCbam(o.origine,anno,false);
+  const cb=o.cbam_manuale!=null?o.cbam_manuale:cbA.eur_t;
+  const box=document.getElementById('of_riepilogo');
+  if(box) box.innerHTML=`<div class="kv" style="margin-top:10px">
+      <div class="k">Costo CIF €</div><div>${eurF(c.cif_eur)}</div>
+      <div class="k">Sdoganamento e sbarco</div><div>${eurF(c.dazio+c.sbarcoTot)}</div>
+      <div class="k">Trasporto e oneri</div><div>${eurF(c.tot3-c.tot2)}</div>
+      <div class="k">Interessi</div><div>${eurF(c.interessi)}</div>
+      <div class="k"><b>Costo totale</b></div><div><b>${eurF(c.costo_tot)} €/t</b></div>
+      <div class="k"><b>Margine</b></div><div><b style="color:${c.margine>0?'#1f8a4c':'#c0392b'}">${eurF(c.margine)} €/t (${eurF(c.margine_pc)}%)</b></div>
+      <div class="k">Ritorno su base annua</div><div>${eurF(c.ritorno)}%</div>
+      <div class="k">Su ${eurF(o.quantita,0)} t</div><div><b>${eurF(c.margine*o.quantita)} €</b></div>
+    </div>`;
+  const cbox=document.getElementById('of_cbam');
+  if(cbox){
+    // Il CBAM è quotato AL CLIENTE in aggiunta al prezzo (on top): non entra nel
+    // conteggio del margine, è una partita di giro che si salda a consuntivo.
+    cbox.innerHTML=`<div class="kv">
+        <div class="k">Costo CBAM ${anno}</div><div><b>${eurF(cb)} €/t</b>${o.cbam_manuale!=null?' <span class="pempty">(forzato)</span>':''}</div>
+        <div class="k">Prezzo + CBAM</div><div><b>${eurF(o.prezzo_vendita+cb)} €/t</b></div>
+        <div class="k">CBAM su ${eurF(o.quantita,0)} t</div><div>${eurF(cb*o.quantita)} €</div>
+      </div>
+      <div class="pmeta" style="margin-top:6px">${esc(cbA.dettaglio)}</div>
+      <div class="pmeta">Quotato in aggiunta al prezzo, salvo conguaglio: non incide sul margine.</div>`;
+  }
+}
+async function salvaOff(id){
+  const fields=leggiOff();
+  const msg=document.getElementById('ofMsg'), btn=document.getElementById('ofBtn');
+  if(!fields.codice){ msg.textContent="Scegli il cliente."; return; }
+  const c=conteggio(fields);
+  const anno=new Date(fields.data||Date.now()).getFullYear();
+  fields.costo_totale=c.costo_tot; fields.margine=c.margine; fields.margine_pc=c.margine_pc;
+  fields.cbam_eur_t=fields.cbam_manuale!=null?fields.cbam_manuale:calcolaCbam(fields.origine,anno,false).eur_t;
+  btn.disabled=true; btn.textContent="Salvataggio…";
+  const {ok,j}=await apiPost('/offerta',{id:id||null,fields});
+  if(ok&&j.offerta){ OFF[j.offerta.id]=j.offerta; msg.textContent="Salvato ✓"; renderOff();
+    if(!id) setTimeout(()=>apriOff(j.offerta.id),600); }
+  else { msg.textContent=(j&&j.error)||"Errore nel salvataggio."; }
+  btn.disabled=false; btn.textContent=id?'Salva':'Crea offerta';
+}
+async function delOff(id){
+  if(!confirm("Eliminare questa offerta?")) return;
+  const {ok,j}=await apiPost('/offerta-delete',{id});
+  if(ok){ delete OFF[id]; closeDrawer(); renderOff(); } else alert((j&&j.error)||"Errore.");
+}
+// Documento per il cliente: riproduce il format dell'offerta UNICOAL.
+// Si apre in una finestra a parte e si salva in PDF con la stampa del browser,
+// così non serve nessuna libreria e la resa resta fedele.
+const AZIENDA={
+  nome:"UNICOAL S.p.A.",
+  indirizzo:"Via Vincenzo Gioberti, 5 — 20123 Milano",
+  tel:"Tel. +39 02 485 971", fax:"Fax +39 02 481 8831",
+  mail:"info@unicoal.it", piva:"P.IVA 10082470153"
+};
+const LOGO_UNICOAL="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAjAAAABjAQMAAAC/uqhcAAAABlBMVEX///8AAABVwtN+AAAFWklEQVR42u2ZMW8bNxTHf+QdLA5CfNk8BDa/QTSmRWqz+SQeO7pABg9pRQcZMmTw2NEfo0NRME3Qdqu/QFEq8KCtjGEEtHA+driTLJ1k+5IYHVpzok68P9/7P77/e5Tg1oZuP0jJXbN867ew9EwO/dABwzD0n2GJvB2H7mDuYO5g/ssw+aqH4o6b/w1ML82mWYr1ZD3Z6SR2gMnCPvt4SDsOeEzPAojAPs2k57pYY4VlY/rBwS7AGvRoJgw6ObVWLwbIoIbcqCHrSb8TjBop0RDRb/Znd2rEbhIm6wQz0BNMPS2S0AIQdiSsArDv+B3bBeYrplFBTzjBguSIoxwQeGabXA/zFFzTp5gxFxjIk2UsAYlJyeouMGE9+KKJ2hFYDWoCE2EhTz1Cp4CLo71+mGqOTe6ogCL2qoQBJhv0j4sOsrV2UBFVjZ8yHgUFOjwSzn4NKu6SxS7WpDV41uBXfdYiYLxj4DTw3kIdsxtgKgXbtYGqHCDKHOwb6PsCCgk87mJN+VDMQhHNgbEALziUQQH+XJjNLjDxS1yT4kUY2uNtiUjq/FsRAf024osuMGGfWShGFXELqIox5lkOqEBYXUpaMKPLjlfLM8riAIn2+G0Jxnpi6mLNE0/keaMTgQqgxFCjF45SdYHJHTQLTQ4oRx53qL07vCItl2EUlNP5S0/KsWChLAS871582/v9+Xo99KHCAqOukj4XzmHh4PkJiBJQ1zi0DNNWgVPAAwn3MQVmp/XtISDjVY1Hl3JXaTvnp21UL+8Es4qA2p3msvUodrSmWuqUwuWyzIVPreH5pUk8vtAfC7OiBPTc24+luFxxBuKFKT7VqUuC1jnJxp8KY2dWDZJ+/HltkgBw74T7/G5LoDdvoWlbu8DfCBNuhFFn65xdBeMW5OEqihOeIuxduVRSuKuyqa1EIzu6mZsrgC7p0L8mfR2Mar+wWhLMy9Ob9EYsB8G1EywVrTBkl+9Ir3y+Iu5p5mVZNPJh9dHimgdN73uvfl9CzutVtm7PMl03SjQvW7rpfe/XMGKFFzVVQs34d2BaUfji/hw3ecCysRQoCbDTs6FSc7KxML6JM02RgcguekVWGKAwjeAYBKl92Mt6b22RSHggXGofHBuACkfKQUTsskXTQH0ACSVZRZUv5zNYTSzmD2nuV8i/McgoKlY6H6dPn0MeVp1xnSx/+CmTCSCqVgPknhUIjEUJQKQ6osq18uzhBvwNssQaICzlrlHICCXOsuFXpccrYGLAaiQYDxzpql33cvIwhNwb9C9Vfa6LH+ZWvHEQT2qnKvQYkjUtdvxWhhpBJcMA86IEnGFrYckAQkD4Q2SiOLecLh2/gHV7DiDey4Y1jZqf56VifG8WRAmKA1EI2kW+cDv2eUUSpSgrFQFfiHK+lp4fNNFQSOxaDddSgag8KS/BfgdnRQAR+pvjBaMPbf2qQ+JEfbNsCU6Zj5koAGMJGrBPM7+oomfgIwwdEo8DBkttmTxnXERwg0O08fUN8sliME0tnTmSwCPAtTmuhBV6N4BX74WwDpzWp/P3Z2FrHcqFRhLpebZIS/JnwHoIayCx4DdGxeCK1kVSwlbyVEv1aUCGgzMB/dTc9X9a7hFJnCK5WOxnLpOqTx8LFZ69CRCEzT7M26txUKDqc1OTstS4HGduLwGJzcxGIDIsF05FIZuKe46EWu+PloVix04AjCg5buxdWPXqwYFTD9Yr6Ek4AS5/DJiNybQOHDdsXtTaM5eaf0Hvx9To2oVt2nr4ft51W3fpnNLwZ7io5lPmeALjMOM1S2nVpa2XGtq3mj9BeslfU+I/a/i73/3+JZhbGv8ARGHvMaBDQD4AAAAASUVORK5CYII=";
+function testoOfferta(o){
+  const c=conteggio(o);
+  const anno=new Date(o.data||Date.now()).getFullYear();
+  const cb=o.cbam_manuale!=null?valNum(o.cbam_manuale):calcolaCbam(o.origine,anno,false).eur_t;
+  const cert=valNum(o.cbam_certificato)||80;
+  const dt=s=>{ if(!s) return ""; const p=String(s).split("-"); return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:s; };
+  const r=(l,v)=>`<tr><td class="lab">${l}</td><td class="val">${v}</td></tr>`;
+  return `<div class="doc">
+    <div class="head"><img class="logo" src="${LOGO_UNICOAL}" alt="Unicoal S.p.A.">
+      <div class="nr">${esc(o.numero||"")} · ${dt(o.data)}</div></div>
+    <p>Buongiorno${o.referente?" "+esc(o.referente):""},</p>
+    <p>Come da accordi intercorsi abbiamo il piacere di sottoporti la nostra migliore offerta
+       per la fornitura del seguente materiale:</p>
+    <table class="tab">
+      ${r("Materiale:",`<b>${esc(o.qualita||"")}</b>`)}
+      ${r("Origine:",`<b>${esc(o.origine||"")}</b>`)}
+      ${r("Prezzo:",`Euro <b>${eurF(o.prezzo_vendita)}/Mt.</b> ${esc(o.resa||"")}`+
+         (cb>0?`<div class="sub2">+ CBAM €/Mt. ${eurF(cb)} (salvo conguaglio) posto il costo di € ${eurF(cert)} per certificato ETS</div>`:""))}
+      ${r("Quantità:",`<b>Mt. ${eurF(o.quantita,0)}</b>`)}
+      ${r("Consegna:",`<b>${esc(o.consegna||"")}</b>`)}
+      ${r("Pagamento:",`<b>${esc(o.pagamento||"")}</b>`)}
+      ${r("Validità:",`<b>HRS ${esc(o.validita_ora||"12:00")} del ${dt(o.validita)}</b>, oltre soggetta a ns. riconferma finale.`)}
+    </table>
+    ${cb>0?`<div class="cbam"><b>CBAM:</b><br>
+      <u>Il costo CBAM non va pagato subito ma deve essere garantito (a mezzo garanzia effettiva).
+      L'effettivo saldo da febbraio 2027 verrà effettuato contro documenti che attestino la cifra
+      realmente da noi pagata.</u></div>`:""}
+    <p>Attendiamo tua conferma in merito.<br>Cordiali saluti</p>
+    <p class="firma">${esc(nomeBreve(o.owner||USER).replace("."," ").replace(/\b\w/g,m=>m.toUpperCase()))}</p>
+    <div class="riga"></div>
+    <div class="pie">${esc(AZIENDA.nome)} &nbsp;|&nbsp; ${esc(AZIENDA.indirizzo)} &nbsp;|&nbsp;
+      ${esc(AZIENDA.tel)} &nbsp;|&nbsp; ${esc(AZIENDA.fax)} &nbsp;|&nbsp;
+      ${esc(AZIENDA.mail)} &nbsp;|&nbsp; ${esc(AZIENDA.piva)}</div>
+  </div>`;
+}
+function stampaOff(id){
+  const o=Object.assign({},DEFAULT_OFF,OFF[id]||{});
+  const w=window.open("","_blank");
+  if(!w){ alert("Il browser ha bloccato la finestra. Consenti i popup per questo sito."); return; }
+  const nomeFile=`Offerta ${o.numero||""} ${(o.cliente||"").replace(/[^\w\s-]/g,"")} ${o.data||""}`.trim();
+  w.document.write(`<!doctype html><html lang="it"><head><meta charset="utf-8">
+    <title>${nomeFile}</title><style>
+    @page{size:A4;margin:22mm 20mm}
+    body{font-family:Calibri,-apple-system,Segoe UI,Arial,sans-serif;font-size:11.5pt;color:#1a1a1a;line-height:1.5;margin:0}
+    .doc{max-width:180mm;margin:0 auto}
+    .head{border-bottom:1.5px solid #1a1a1a;padding-bottom:10px;margin-bottom:24px;
+          display:flex;align-items:flex-end;justify-content:space-between;gap:12mm}
+    .logo{width:62mm;height:auto;display:block}
+    .nr{font-size:9pt;color:#5c6672;white-space:nowrap;padding-bottom:2px}
+    .pie{position:fixed;bottom:12mm;left:0;right:0;text-align:center;font-size:7.5pt;color:#5c6672;
+         border-top:.5px solid #c9ced4;padding-top:5px;margin:0 20mm}
+    p{margin:0 0 12px}
+    .tab{border-collapse:collapse;margin:16px 0 18px}
+    .tab td{vertical-align:top;padding:2px 0}
+    .lab{width:34mm;text-decoration:underline;white-space:nowrap;padding-right:6mm!important}
+    .sub2{padding-left:0;margin-top:1px}
+    .cbam{margin:16px 0;font-size:11pt}
+    .firma{margin-top:26px;color:#26578a}
+    .riga{border-bottom:1px solid #555;width:62mm;margin-top:4px}
+    .barra{position:fixed;top:0;left:0;right:0;background:#2b3138;color:#fff;padding:9px 14px;font-family:-apple-system,Arial;font-size:13px;display:flex;gap:10px;align-items:center}
+    .barra button{background:#fff;border:0;border-radius:7px;padding:7px 14px;font-weight:600;cursor:pointer}
+    .barra span{opacity:.75;font-size:12px}
+    @media print{.barra{display:none}body{margin:0}}
+    </style></head><body>
+    <div class="barra"><button onclick="window.print()">Salva come PDF</button>
+      <span>Nella finestra di stampa scegli “Salva come PDF”. Nome suggerito: ${esc(nomeFile)}</span></div>
+    <div style="height:46px"></div>
+    ${testoOfferta(o)}
+    </body></html>`);
+  w.document.close();
+  // l'offerta risulta emessa: traccia nella scheda cliente e promemoria in calendario
+  segnaEmessa(id);
+}
+async function segnaEmessa(id){
+  const o=OFF[id]; if(!o || o.stato==="inviata" || o.stato==="accettata") return;
+  const {ok,j}=await apiPost('/offerta-emessa',{id});
+  if(ok&&j.offerta){
+    OFF[id]=j.offerta;
+    if(j.attivita) ATT[j.attivita.id]=j.attivita;
+    renderOff(); if(typeof renderCal==="function") renderCal();
+    await ricaricaInter();
+  }
+}
+// blocco offerte dentro la scheda cliente
+function bloccoOfferte(cod){
+  const l=offList().filter(o=>o.codice===cod)
+    .sort((a,b)=>String(b.data||"").localeCompare(String(a.data||"")));
+  const riga=o=>{
+    const cb=o.cbam_manuale!=null?valNum(o.cbam_manuale):valNum(o.cbam_eur_t);
+    return `<div class="attrow">
+      <div class="when">${esc(o.data||"")}<br><span class="badge2">${esc(o.stato||"bozza")}</span></div>
+      <div style="flex:1">
+        <b>${esc(o.numero||"")}</b> · ${esc(o.qualita||"")} ${esc(o.origine||"")} · ${eurF(o.quantita,0)} t
+        <div class="pmeta">${eurF(o.prezzo_vendita)} €/t${cb?` + CBAM ${eurF(cb)}`:""} ·
+          margine ${eurF(o.margine)} €/t${o.validita?` · valida al ${esc(o.validita)}`:""}</div>
+      </div>
+      <div class="pacts"><button title="Apri" onclick="apriOff('${o.id}')">✎</button>
+        <button title="Anteprima e PDF" onclick="stampaOff('${o.id}')">⎙</button></div>
+    </div>`;
+  };
+  return `<div class="sec"><h3>Offerte
+      <button type="button" class="addbtn" onclick="nuovaOffCliente('${esc(cod)}')">+ Nuova offerta</button></h3>
+    ${l.length?l.slice(0,6).map(riga).join(""):'<span class="pempty">Nessuna offerta per questo cliente.</span>'}</div>`;
+}
+function nuovaOffCliente(cod){
+  closeDrawer();
+  setTimeout(()=>{ apriOff(null); const s=document.getElementById('of_codice');
+    if(s){ s.value=cod; aggiornaRiepilogo(); } },220);
+}
+document.getElementById('btnNuovaOff').onclick=()=>apriOff(null);
+['qo','fStatoOff'].forEach(i=>document.getElementById(i).addEventListener('input',renderOff));
 
 // ================= CALENDARIO E ATTIVITÀ =================
 // Una sola entità "attività" alimenta sia il calendario sia la scheda cliente:
@@ -1001,6 +1355,7 @@ document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('on',x===b));
   document.getElementById('tab-clienti').classList.toggle('hidden', b.dataset.tab!=='clienti');
   document.getElementById('tab-fornitori').classList.toggle('hidden', b.dataset.tab!=='fornitori');
+  document.getElementById('tab-off').classList.toggle('hidden', b.dataset.tab!=='off');
   document.getElementById('tab-cal').classList.toggle('hidden', b.dataset.tab!=='cal');
   document.getElementById('tab-inbox').classList.toggle('hidden', b.dataset.tab!=='inbox');
   document.getElementById('tab-dash').classList.toggle('hidden', b.dataset.tab!=='dash');
@@ -1008,6 +1363,7 @@ document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
   if(b.dataset.tab==='fornitori') renderForn();
   if(b.dataset.tab==='inbox') renderInbox();
   if(b.dataset.tab==='cal') renderCal();
+  if(b.dataset.tab==='off') renderOff();
 });
 // sotto-tab dashboard
 document.querySelectorAll('.dsub button').forEach(b=>b.onclick=()=>{
@@ -1169,6 +1525,7 @@ async function start(){
   renderInbox();
   popolaOwnerCal();
   renderCal();
+  renderOff();
 }
 
 // avvio: se ho un token valido, entro; altrimenti login
