@@ -189,6 +189,30 @@
   .fisse.aperta{max-height:900px;margin-top:8px}
   .chk{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mid);padding-bottom:10px;white-space:nowrap}
   .chk input{width:auto}
+  /* conto economico per nave: gerarchia a due livelli */
+  .tabnavi{overflow-x:auto}
+  .tabnavi .naveriga td{background:var(--light);border-top:2px solid var(--sand);padding-top:9px}
+  .tabnavi .matriga td{font-size:12.5px}
+  .tabnavi .matriga .ind{padding-left:18px;color:var(--mid);position:relative}
+  .tabnavi .matriga .ind::before{content:"└";position:absolute;left:5px;color:var(--sand)}
+  .tabnavi .matriga.dubbia td{opacity:.6}
+  /* grafico mensile offerte/contratti: mesi scritti, non numeri */
+  .legmesi{display:flex;gap:16px;font-size:12px;color:var(--mid);margin-bottom:10px}
+  .legmesi i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .legmesi .q1{background:var(--blue)} .legmesi .q2{background:#1f8a4c}
+  .mesigrid{display:grid;grid-template-columns:repeat(12,1fr);gap:4px;align-items:end}
+  .mcol{text-align:center;min-width:0}
+  .mcol.vuoto{opacity:.35}
+  .mbars{display:flex;gap:2px;align-items:flex-end;justify-content:center;height:56px}
+  .mbars .mb{width:9px;border-radius:3px 3px 0 0;min-height:2px}
+  .mbars .b1{background:var(--blue)} .mbars .b2{background:#1f8a4c}
+  .mval{font-size:10.5px;margin-top:3px;line-height:1.25}
+  .mval b{color:var(--blue)} .mval span{color:#1f8a4c;margin-left:4px}
+  .mnome{font-size:10.5px;color:var(--mid);text-transform:uppercase;letter-spacing:.02em;margin-top:1px}
+  @media(max-width:700px){
+    .mesigrid{grid-template-columns:repeat(6,1fr);gap:8px 6px}
+    .mbars{height:44px}
+  }
   /* grafico a barre essenziale per offerte/contratti */
   .barre{width:100%;border-collapse:collapse;text-align:center}
   .barre th{font-size:10px;color:var(--mid);font-weight:700;padding-bottom:4px}
@@ -237,6 +261,16 @@
   .attrow .when{min-width:96px;color:var(--mid);font-size:12px}
   .attrow .badge2{font-size:10px;font-weight:800;text-transform:uppercase;padding:1px 6px;border-radius:10px;background:var(--light);color:var(--mid)}
   .esito-pos{color:#1f8a4c;font-weight:700}.esito-neg{color:#c0392b;font-weight:700}.esito-neu{color:var(--mid);font-weight:700}
+  /* nessuna tabella deve far scorrere la pagina: lo scorrimento resta nel suo riquadro */
+  .chartbox{overflow-x:auto}
+  .chartbox table.st{min-width:min(100%,560px)}
+  /* iPad in verticale */
+  @media(max-width:900px){
+    .kpis{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
+    .charts{grid-template-columns:1fr}
+    .sectors{grid-template-columns:1fr}
+    .grid{grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+  }
   @media(max-width:700px){
     .cday{min-height:74px}
     .ev{font-size:10px;padding:2px 4px}
@@ -422,7 +456,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "29";
+const APP_VERSION = "30";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -442,6 +476,7 @@ let OFF = {};
 let DOCS = {};
 let SNAP = {};
 let CBAMIMP = {};
+let CBAMSPE = {};
 let CBAM = { prezzo_certificato:75.28, benchmark:{A:1.089,B:1.210},
   maggiorazione:{"2026":0.10,"2027":0.20,"2028":0.30,"2029":0.30,"2030":0.30,"2031":0.30,"2032":0.30,"2033":0.30,"2034":0.30},
   fattore:{"2026":0.975,"2027":0.95,"2028":0.90,"2029":0.775,"2030":0.515,"2031":0.39,"2032":0.265,"2033":0.14,"2034":0},
@@ -538,6 +573,7 @@ async function loadData(){
   DOCS = j.documenti || {};
   CBAM = j.cbam || CBAM;
   CBAMIMP = j.cbamImpianti || CBAMIMP;
+  CBAMSPE = j.cbamSpedizioni || CBAMSPE;
   USER = (j.user||USER||"").toLowerCase();
   const byCode={}; (snap.clienti||[]).forEach(c=>{ byCode[c.codice]=Object.assign({},c); });
   // nuovi clienti creati dall'app e non ancora nel database
@@ -1818,6 +1854,7 @@ function coloreUtente(email){
 }
 function nomeBreve(email){ return String(email||"").split("@")[0]; }
 let CAL_REF=new Date(); let CAL_VISTA="mese";
+const MESI_BREVI=["gen","feb","mar","apr","mag","giu","lug","ago","set","ott","nov","dic"];
 const MESI=["gennaio","febbraio","marzo","aprile","maggio","giugno","luglio","agosto","settembre","ottobre","novembre","dicembre"];
 const DOW=["lun","mar","mer","gio","ven","sab","dom"];
 const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -1952,14 +1989,14 @@ async function salvaAtt(id){
   if(!fields.data){ msg.textContent="Serve una data."; return; }
   btn.disabled=true; btn.textContent="Salvataggio…";
   const {ok,j}=await apiPost('/attivita',{id:id||null,fields});
-  if(ok&&j.attivita){ ATT[j.attivita.id]=j.attivita; msg.textContent="Salvato ✓"; renderCal();
+  if(ok&&j.attivita){ ATT[j.attivita.id]=j.attivita; msg.textContent="Salvato ✓"; renderCal(); renderPStrip(); render();
     if(j.attivita.codice && CURRENT_COD===j.attivita.codice) {} setTimeout(closeDrawer,700); }
   else { msg.textContent=(j&&j.error)||"Errore nel salvataggio."; btn.disabled=false; btn.textContent="Salva"; }
 }
 async function delAtt(id){
   if(!confirm("Eliminare questa attività?")) return;
   const {ok,j}=await apiPost('/attivita-delete',{id});
-  if(ok){ delete ATT[id]; closeDrawer(); renderCal(); } else alert((j&&j.error)||"Errore.");
+  if(ok){ delete ATT[id]; closeDrawer(); renderCal(); renderPStrip(); render(); } else alert((j&&j.error)||"Errore.");
 }
 // Chiusura dell'attività: esito + se è stata fatta un'offerta + eventuale prossimo passo
 function apriEsito(id){
@@ -1996,7 +2033,7 @@ function apriEsito(id){
     if(ok&&j.attivita){
       ATT[j.attivita.id]=j.attivita; if(j.creata) ATT[j.creata.id]=j.creata;
       if(j.attivita.codice){ await ricaricaInter(); }
-      msg.textContent="Registrato ✓"; renderCal(); setTimeout(closeDrawer,700);
+      msg.textContent="Registrato ✓"; renderCal(); renderPStrip(); render(); setTimeout(closeDrawer,700);
     } else { msg.textContent=(j&&j.error)||"Errore."; btn.disabled=false; btn.textContent="Registra esito"; }
   };
   d.classList.add('open'); document.getElementById('ov').classList.add('open');
@@ -2132,17 +2169,16 @@ document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
   document.getElementById('tab-cal').classList.toggle('hidden', b.dataset.tab!=='cal');
   document.getElementById('tab-inbox').classList.toggle('hidden', b.dataset.tab!=='inbox');
   document.getElementById('tab-dash').classList.toggle('hidden', b.dataset.tab!=='dash');
+  assicuraSezione(b.dataset.tab);
   if(b.dataset.tab==='dash') renderDash();
-  if(b.dataset.tab==='fornitori') renderForn();
-  if(b.dataset.tab==='inbox') renderInbox();
-  if(b.dataset.tab==='cal') renderCal();
-  if(b.dataset.tab==='off'){ renderOff(); renderDocs(); }
-  if(b.dataset.tab==='cbam') renderCbam();
 });
-// sotto-tab dashboard
-document.querySelectorAll('.dsub button').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('.dsub button').forEach(x=>x.classList.toggle('on',x===b));
+// Sotto-tab della dashboard. Il selettore DEVE restare circoscritto a #tab-dash:
+// con '.dsub button' si prendevano anche i sotto-tab di CBAM e Inbox, sovrascrivendone
+// gli handler (era la causa della pagina Dichiarazione che non si apriva).
+document.querySelectorAll('#tab-dash .dsub button[data-d]').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#tab-dash .dsub button[data-d]').forEach(x=>x.classList.toggle('on',x===b));
   ['mercato','vendite','magazzino'].forEach(d=>document.getElementById('d-'+d).classList.toggle('hidden',d!==b.dataset.d));
+  DASH_ATTIVA=b.dataset.d;
   renderDash();
 });
 // i filtri manuali azzerano tipologia/preset impostati dai click dashboard
@@ -2251,40 +2287,100 @@ function renderCommerciale(){
       ${kpi('€ '+num(k.vendite.valore),'Fatturato',tons(k.vendite.tonnellate))}
       ${kpi((k.conversione!=null?k.conversione+'%':'—'),'Conversione','contratti su offerte')}
     </div>
-    <div class="chartbox wide"><h4>Offerte e contratti per mese</h4>
-      <table class="barre"><tr><th></th>${mesi.map(m=>`<th>${m}</th>`).join("")}</tr>
-        <tr><td class="lb">offerte</td>${mesi.map(m=>`<td><div class="bar b1" style="height:${Math.round(34*(off[m]||0)/maxv)}px" title="${off[m]||0}"></div><span>${off[m]||''}</span></td>`).join("")}</tr>
-        <tr><td class="lb">contratti</td>${mesi.map(m=>`<td><div class="bar b2" style="height:${Math.round(34*(con[m]||0)/maxv)}px" title="${con[m]||0}"></div><span>${con[m]||''}</span></td>`).join("")}</tr>
-      </table>
-      <p class="hint">Offerte: documenti archiviati più quelle create nell'app. Contratti: numeri contratto distinti presenti nelle vendite.</p>
+    <div class="chartbox wide"><h4>Offerte e contratti, mese per mese ${k.anno}</h4>
+      <div class="legmesi"><span><i class="q1"></i>offerte presentate</span><span><i class="q2"></i>contratti</span></div>
+      <div class="mesigrid">
+        ${mesi.map(m=>{
+          const o=off[m]||0, c=con[m]||0;
+          const vuoto=(!o&&!c);
+          return `<div class="mcol ${vuoto?'vuoto':''}">
+            <div class="mbars">
+              <div class="mb b1" style="height:${Math.round(52*o/maxv)}px" title="${o} offerte"></div>
+              <div class="mb b2" style="height:${Math.round(52*c/maxv)}px" title="${c} contratti"></div>
+            </div>
+            <div class="mval"><b>${o||'·'}</b><span>${c||'·'}</span></div>
+            <div class="mnome">${MESI_BREVI[+m-1]}</div>
+          </div>`;}).join("")}
+      </div>
+      <p class="hint">Offerte: documenti archiviati più quelle create nell'app. Contratti: numeri contratto distinti nelle vendite.</p>
     </div>`;
 }
-// Quanto CBAM è maturato sulle importazioni già vendute: è il conto che arriverà.
+// L'obbligo CBAM nasce dallo SDOGANAMENTO, non dalla vendita: si calcola sul registro
+// delle importazioni, escludendo quelle anteriori al 2026 (periodo transitorio, nessun costo).
+// Il prezzo del certificato è quello del trimestre di importazione, non una media annua.
+function prezzoCertTrim(anno,mese){
+  const C=CBAM||{};
+  const q="T"+(Math.floor((mese-1)/3)+1);
+  const p=(C.prezzo_certificato_storico||[]).find(x=>String(x.periodo)===anno+"-"+q);
+  return {valore:(p?p.valore:C.prezzo_certificato), periodo:(p?p.periodo:"corrente")};
+}
+function importazioniAnno(anno){
+  const sp=((CBAMSPE||{}).spedizioni)||[];
+  return sp.filter(s=>String(s.data||"").slice(0,4)===String(anno));
+}
+function paeseImpianto(impId){
+  const i=((CBAMIMP||{}).impianti||{})[impId];
+  return (i&&i.paese)||null;
+}
 function renderCbamEsposizione(){
   const box=document.getElementById('box-cbam'); if(!box) return;
-  const c=(SNAP&&SNAP.cbam)||{};
-  if(!c.per_origine){ box.innerHTML='<div class="pempty">Esposizione CBAM non ancora calcolata.</div>'; return; }
-  const righe=Object.entries(c.per_origine).sort((a,b)=>b[1].costo-a[1].costo);
-  const na=c.non_attribuito||{tonnellate:0,righe:0};
-  const quota=na.tonnellate/Math.max(1,(na.tonnellate+c.totale_tonnellate))*100;
+  const anno=new Date().getFullYear();
+  const imp=importazioniAnno(anno);
+  if(!imp.length){
+    box.innerHTML='<div class="pempty">Nessuna importazione registrata per il '+anno+
+      '. Il registro degli sdoganamenti si compila nella sezione CBAM.</div>';
+    return;
+  }
+  const perQ={}; const perImp={};
+  let tot=0, totT=0;
+  imp.forEach(s=>{
+    const m=+String(s.data).slice(5,7), q="T"+(Math.floor((m-1)/3)+1);
+    const pz=prezzoCertTrim(anno,m);
+    const orig=paeseImpianto(s.impId)||"BRASILE";
+    const d=cbamDettaglio(orig,anno,false,pz.valore);
+    const eur=d?d.eur_t:0, costo=eur*(s.qta||0);
+    tot+=costo; totT+=(s.qta||0);
+    const a=perQ[q]||(perQ[q]={t:0,costo:0,prezzo:pz.valore,eur_t:eur,sdog:0});
+    a.t+=s.qta||0; a.costo+=costo; a.sdog++;
+    const b=perImp[s.impId]||(perImp[s.impId]={t:0,costo:0,nc:s.nc,orig});
+    b.t+=s.qta||0; b.costo+=costo;
+  });
+  const accant=(()=>{ // confronto con l'accantonamento in esposizione finanziaria
+    const r=((OPER||{}).esposizione||{}).righe||[];
+    const v=r.find(x=>/CBAM/i.test(String(x.voce||"")));
+    return v?(v.eur||0):null;
+  })();
   box.innerHTML=`
     <div class="kpis">
-      ${kpi('€ '+num(c.totale_costo),'CBAM maturato '+c.anno,'sulle tonnellate con origine nota')}
-      ${kpi(tons(c.totale_tonnellate),'Volume tracciato','')}
-      ${kpi(tons(na.tonnellate),'Volume senza origine',na.righe+' righe da completare')}
-      ${kpi('€ '+num(c.prezzo_certificato),'Prezzo certificato','aggiornato '+(c.aggiornato||'—'))}
+      ${kpi('€ '+num(Math.round(tot)),'CBAM maturato '+anno,imp.length+' sdoganamenti')}
+      ${kpi(tons(totT),'Importato soggetto','solo dal 1° gennaio 2026')}
+      ${kpi('€ '+num(Math.round(tot/Math.max(totT,1))),'Costo medio per tonnellata','')}
+      ${accant!=null?kpi('€ '+num(Math.round(accant)),'Accantonato a bilancio','voce esposizione CBAM'):''}
     </div>
-    <div class="chartbox wide"><h4>Esposizione per origine</h4>
-      <table class="st"><tr><th>Origine</th><th class="num">Tonnellate</th><th class="num">€/t</th><th class="num">Costo CBAM</th></tr>
-      ${righe.map(([o,r])=>`<tr><td>${esc(o)}</td><td class="num">${tons(r.tonnellate)}</td>
-        <td class="num">${num(r.eur_t)}</td><td class="num">€ ${num(r.costo)}</td></tr>`).join("")}
-      <tr style="font-weight:700"><td>Totale</td><td class="num">${tons(c.totale_tonnellate)}</td><td></td><td class="num">€ ${num(c.totale_costo)}</td></tr>
+    <div class="chartbox wide"><h4>Per trimestre di sdoganamento</h4>
+      <table class="st"><tr><th>Trimestre</th><th class="num">Sdoganamenti</th><th class="num">Tonnellate</th>
+        <th class="num">Certificato</th><th class="num">€/t</th><th class="num">Costo</th></tr>
+      ${["T1","T2","T3","T4"].filter(q=>perQ[q]).map(q=>`<tr><td>${q} ${anno}</td>
+        <td class="num">${perQ[q].sdog}</td><td class="num">${tons(perQ[q].t)}</td>
+        <td class="num">${eurF(perQ[q].prezzo)} €</td><td class="num">${eurF(perQ[q].eur_t)}</td>
+        <td class="num">€ ${num(Math.round(perQ[q].costo))}</td></tr>`).join("")}
+      <tr style="font-weight:700"><td>Totale</td><td class="num">${imp.length}</td><td class="num">${tons(totT)}</td>
+        <td></td><td></td><td class="num">€ ${num(Math.round(tot))}</td></tr>
       </table>
-      ${na.tonnellate>0?`<div class="alertbar" style="margin-top:12px">
-        <b>${tons(na.tonnellate)}</b> venduti nel ${c.anno} non hanno il produttore indicato (${Math.round(quota)}% del volume):
-        su quella quota l'obbligo CBAM non è calcolabile. Compilando il campo Produttore nelle vendite il conto si completa da solo.</div>`:''}
-      <p class="hint">Calcolo con valori predefiniti e benchmark colonna B. Con dati di emissione verificati l'obbligo si riduce o si azzera.</p>
-    </div>`;
+      <p class="hint">Il prezzo del certificato cambia ogni trimestre: nel 2026 è pubblicato trimestralmente, dal 2027 diventa settimanale.</p>
+    </div>
+    <div class="chartbox wide"><h4>Per impianto di provenienza</h4>
+      <table class="st"><tr><th>Impianto</th><th>Voce NC</th><th class="num">Tonnellate</th><th class="num">Costo</th></tr>
+      ${Object.entries(perImp).sort((a,b)=>b[1].costo-a[1].costo).map(([k,v])=>`<tr>
+        <td>${esc(((CBAMIMP||{}).impianti||{})[k]?.nome_esteso||k)}</td><td>${esc(v.nc||'')}</td>
+        <td class="num">${tons(v.t)}</td><td class="num">€ ${num(Math.round(v.costo))}</td></tr>`).join("")}
+      </table>
+    </div>
+    ${accant!=null?`<div class="alertbar" style="margin-top:0">Calcolato <b>€ ${num(Math.round(tot))}</b> contro
+      <b>€ ${num(Math.round(accant))}</b> accantonati: scarto di € ${num(Math.round(Math.abs(tot-accant)))}
+      (${(Math.abs(tot-accant)/Math.max(accant,1)*100).toFixed(1)}%).</div>`:''}
+    <p class="hint">Le importazioni anteriori al 2026 ricadono nel periodo transitorio e non generano obbligo: non entrano in questo conto.
+      Calcolo con valori predefiniti e benchmark colonna B.</p>`;
 }
 // Conto economico per nave: quanto è costato il carico, quanto ha reso,
 // quanto pesa il CBAM sull'origine di quel materiale.
@@ -2301,38 +2397,62 @@ function renderNavi(){
   const navi=d.navi.filter(n=>(n.totale||0)>0||(n.venduto||0)>0);
   let cbamTot=0;
   navi.forEach(n=>{ n._cbam=(cbamT[n.origine]||0)*(n.totale||0); cbamTot+=n._cbam; });
-  const ord=navi.slice().sort((a,b)=>(b.margine_eur||0)-(a.margine_eur||0));
-  const riga=n=>{
-    const m=n.margine_eur, mt=n.margine_eur_t;
+  // Gerarchia: prima la nave, poi i materiali che portava. Così il carico si legge
+  // come un'unica partita, invece di righe sparse tutte allo stesso livello.
+  const perNave={};
+  navi.forEach(n=>{
+    const k=(n.nave||'Carico senza nave identificata').trim();
+    const g=perNave[k]||(perNave[k]={nave:k,origine:n.origine,tot:0,vend:0,disp:0,
+      ricavo:0,margine:0,cbam:0,righe:[],verificabili:0,dubbi:0});
+    g.tot+=n.totale||0; g.vend+=n.venduto||0; g.disp+=n.disponibile||0;
+    g.ricavo+=n.ricavo_eur||0; g.cbam+=n._cbam||0;
+    if(n.attendibile){ g.margine+=n.margine_eur||0; g.verificabili++; } else g.dubbi++;
+    if(!g.origine&&n.origine) g.origine=n.origine;
+    g.righe.push(n);
+  });
+  const gruppi=Object.values(perNave).sort((a,b)=>b.margine-a.margine);
+  const rigaMat=n=>{
     const alert=!n.attendibile;
-    return `<tr${alert?' style="opacity:.62"':''}>
-      <td><b>${esc(n.nave||'—')}</b><div class="pmeta">${esc(n.prodotto||'')} · ${esc(n.origine||'origine ignota')}</div></td>
+    return `<tr class="matriga${alert?' dubbia':''}">
+      <td class="ind">${esc(n.prodotto||'materiale non indicato')}
+        ${alert?`<div class="pmeta">${esc((n.avvisi||[]).join(' · '))}</div>`:''}</td>
       <td class="num">${num(Math.round(n.totale||0))}</td>
       <td class="num">${num(Math.round(n.venduto||0))}</td>
       <td class="num">${n.disponibile!=null?num(Math.round(n.disponibile)):'—'}</td>
       <td class="num">${n.costo_eur_t!=null?eurF(n.costo_eur_t):'—'}</td>
       <td class="num">${n.ricavo_eur?('€ '+num(n.ricavo_eur)):'—'}</td>
       <td class="num">${alert?'<span class="pempty">da verificare</span>':
-          (m!=null?`<b style="color:${m>0?'#1f8a4c':'#c0392b'}">€ ${num(m)}</b>${mt!=null?`<div class="pmeta">${eurF(mt)} €/t</div>`:''}`:'—')}</td>
-      <td class="num">${n._cbam?('€ '+num(Math.round(n._cbam))):'—'}</td>
-    </tr>${alert&&n.avvisi&&n.avvisi.length?`<tr><td colspan="8" class="pmeta" style="padding-top:0">↳ ${esc(n.avvisi.join(' · '))}</td></tr>`:''}`;
+        (n.margine_eur!=null?`<b style="color:${n.margine_eur>0?'#1f8a4c':'#c0392b'}">€ ${num(n.margine_eur)}</b>`+
+         (n.margine_eur_t!=null?`<div class="pmeta">${eurF(n.margine_eur_t)} €/t</div>`:''):'—')}</td>
+      <td class="num">${n._cbam?('€ '+num(Math.round(n._cbam))):'—'}</td></tr>`;
   };
+  const rigaNave=g=>`
+    <tr class="naveriga"><td><b>${esc(g.nave)}</b>
+        <div class="pmeta">${esc(g.origine||'origine da determinare')} · ${g.righe.length} ${g.righe.length===1?'materiale':'materiali'}${g.dubbi?` · ${g.dubbi} da verificare`:''}</div></td>
+      <td class="num">${num(Math.round(g.tot))}</td>
+      <td class="num">${num(Math.round(g.vend))}</td>
+      <td class="num">${num(Math.round(g.disp))}</td>
+      <td class="num">—</td>
+      <td class="num">€ ${num(Math.round(g.ricavo))}</td>
+      <td class="num"><b style="color:${g.margine>0?'#1f8a4c':'#c0392b'}">€ ${num(Math.round(g.margine))}</b></td>
+      <td class="num">€ ${num(Math.round(g.cbam))}</td></tr>
+    ${g.righe.sort((a,b)=>(b.totale||0)-(a.totale||0)).map(rigaMat).join("")}`;
   box.innerHTML=`
     <div class="kpis">
-      ${kpi(tons(d.importato_totale),'Importato','su '+navi.length+' carichi')}
+      ${kpi(tons(d.importato_totale),'Importato',gruppi.length+' navi · '+navi.length+' carichi')}
       ${kpi(tons(d.venduto_totale),'Venduto',tons(d.disponibile_totale)+' a magazzino')}
       ${kpi('€ '+num(d.margine_attendibile||0),'Margine lordo',`su ${d.carichi_attendibili} carichi verificabili`)}
       ${kpi('€ '+num(Math.round(cbamTot)),'CBAM sui carichi','stima '+anno+' sulle tonnellate importate')}
     </div>
-    <div class="chartbox wide"><h4>Conto economico per nave</h4>
-      <table class="st">
-        <tr><th>Nave</th><th class="num">Importato t</th><th class="num">Venduto t</th><th class="num">Disponibile</th>
+    <div class="chartbox wide"><h4>Conto economico per nave e materiale</h4>
+      <div class="tabnavi"><table class="st">
+        <tr><th>Nave / materiale</th><th class="num">Importato t</th><th class="num">Venduto t</th><th class="num">Disponibile</th>
             <th class="num">Costo €/t</th><th class="num">Ricavo</th><th class="num">Margine</th><th class="num">CBAM</th></tr>
-        ${ord.map(riga).join("")}
-      </table>
-      <p class="hint">Costi e ricavi in valuta estera convertiti al cambio ${eurF(d.cambio||1.15)}.
-        I carichi segnati "da verificare" hanno letture incoerenti nel foglio e non entrano nel totale del margine.
-        Il CBAM è calcolato sull'origine del carico con i valori predefiniti.</p>
+        ${gruppi.map(rigaNave).join("")}
+      </table></div>
+      <p class="hint">Righe in grassetto: totale della nave. Sotto, i materiali che trasportava.
+        Valute estere convertite al cambio ${eurF(d.cambio||1.15)}. I carichi "da verificare" hanno letture
+        incoerenti nel foglio e non entrano nel margine. CBAM sull'origine del carico, valori predefiniti.</p>
     </div>`;
 }
 function renderMagazzino(){
@@ -2370,10 +2490,34 @@ function renderDash(){
   else renderMercato();
 }
 // pipeline come filtro nella sezione Clienti
+// I filtri leggono le fonti vere — calendario, offerte, contratti — non il campo
+// scritto a mano nel Master: fissare un appuntamento nel calendario non lo aggiornava,
+// e il chip "Appuntamenti" restava a zero anche con appuntamenti in agenda.
+function attDi(cod,tipi,soloFuture){
+  if(!cod) return [];
+  const oggi=oggiIso();
+  return Object.values(ATT||{}).filter(a=>a.codice===cod
+    && (!tipi || tipi.includes(a.tipo))
+    && (!soloFuture || (a.stato==='pianificata' && String(a.data||'')>=oggi)));
+}
+function haAppuntamento(c){ return attDi(c.codice,['appuntamento','visita'],true).length>0; }
+function daEsitareCliente(c){
+  const ora=new Date();
+  return attDi(c.codice,null,false).some(a=>{
+    if(a.stato!=='pianificata') return false;
+    const fine=new Date((a.data||'')+'T'+((a.ora||'23:59'))+':00');
+    if(isNaN(fine)) return false;
+    return new Date(fine.getTime()+(a.durata_min||60)*60000)<ora;
+  });
+}
 const BUCKETS=[
-  {t:"Da contattare",f:c=>c.stato_attivita==='Da fare'},
-  {t:"In corso",f:c=>['Contattato','Insistere'].includes(c.stato_attivita)},
-  {t:"Appuntamenti",f:c=>c.stato_attivita==='Appuntamento fissato'},
+  {t:"Appuntamenti",f:haAppuntamento},
+  {t:"Da esitare",f:daEsitareCliente},
+  {t:"Caldi",f:c=>c.stato_calcolato==='Cliente caldo'},
+  {t:"Raffreddamento",f:c=>c.stato_calcolato==='Cliente raffreddamento'},
+  {t:"Contratto attivo",f:c=>(c.contratti_aperti||0)>0},
+  {t:"Da riprendere",f:c=>c.stato_calcolato==='Da riprendere'},
+  {t:"Mai contattati",f:c=>!c.stato_calcolato && !attDi(c.codice,null,false).length && !(INTER&&INTER[c.codice]||[]).length},
   {t:"Follow-up in scadenza",f:c=>{if(!c.data_followup)return false;const t=new Date(new Date().toDateString());const d=new Date(c.data_followup);return d>=t&&d<=new Date(t.getTime()+14*864e5);}},
   {t:"Follow-up scaduti",f:c=>{if(!c.data_followup)return false;return new Date(c.data_followup)<new Date(new Date().toDateString());}},
 ];
@@ -2395,14 +2539,26 @@ async function start(){
   fillSelect('fSettore',DATA.map(c=>c.settore));
   fillSelect('fStatus',DATA.map(c=>c.status));
   fillSelect('fProv',DATA.map(c=>c.provincia));
+  // All'avvio si disegna solo ciò che si vede: la lista clienti e i filtri.
+  // Le altre sezioni vengono disegnate al primo ingresso nel loro tab (vedi SEZ_PRONTE):
+  // con 119 clienti, 180 attività e 300 documenti, disegnare tutto insieme costava
+  // qualche secondo di attesa a ogni accesso.
   renderPStrip();
   render();
-  renderForn();
-  renderInbox();
   popolaOwnerCal();
-  renderCal();
-  renderOff();
-  renderDocs();
+  updateBadge();        // contatore Inbox
+  renderDaEsitare();    // contatore Calendario
+}
+// sezioni già disegnate almeno una volta
+const SEZ_PRONTE={};
+function assicuraSezione(tab){
+  if(SEZ_PRONTE[tab]) return;
+  SEZ_PRONTE[tab]=true;
+  if(tab==='fornitori') renderForn();
+  else if(tab==='off'){ renderOff(); renderDocs(); }
+  else if(tab==='cal') renderCal();
+  else if(tab==='inbox') renderInbox();
+  else if(tab==='cbam') renderCbam();
 }
 
 // avvio: se ho un token valido, entro; altrimenti login

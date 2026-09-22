@@ -210,7 +210,7 @@ def origine_cbam(produttore):
         if k in p: return v
     return None
 
-def costo_cbam(origine, anno, cfg):
+def costo_cbam(origine, anno, cfg, prezzo=None):
     """(valore predefinito x maggiorazione - benchmark x fattore) x prezzo certificato.
     Benchmark colonna B: è quello da usare quando si dichiara con i valori predefiniti."""
     o = (cfg.get("origini") or {}).get(origine)
@@ -221,7 +221,7 @@ def costo_cbam(origine, anno, cfg):
     bm = (cfg.get("benchmark") or {}).get("B")
     if magg is None or fatt is None or bm is None: return 0.0
     netto = max(o.get("valore_predefinito",0)*(1+magg) - bm*fatt, 0)
-    return netto * cfg.get("prezzo_certificato", 0)
+    return netto * (prezzo if prezzo is not None else cfg.get("prezzo_certificato", 0))
 
 CBAM_FALLBACK = {
     "prezzo_certificato": 75.28, "benchmark": {"A":1.089,"B":1.210},
@@ -233,8 +233,24 @@ CBAM_FALLBACK = {
                 "UCRAINA":{"valore_predefinito":2.173},"UE":{"valore_predefinito":0}},
 }
 
+def prezzo_trimestre(cfg, anno, mese):
+    """Prezzo del certificato del trimestre di riferimento.
+
+    Nel 2026 il prezzo è pubblicato per trimestre e cambia: usare quello del periodo
+    dà l'esposizione corretta invece di applicare un prezzo unico a tutto l'anno."""
+    q = (mese - 1)//3 + 1
+    for p in (cfg.get("prezzo_certificato_storico") or []):
+        if str(p.get("periodo","")).upper() == f"{anno}-T{q}":
+            return p.get("valore"), f"{anno}-T{q}"
+    return cfg.get("prezzo_certificato"), "corrente"
+
+
 def blocco_cbam(xlsx_bytes, cfg, anno):
-    """Esposizione CBAM maturata sulle importazioni vendute nell'anno, per origine."""
+    """Esposizione CBAM sulle merci vendute nell'anno.
+
+    Conta solo ciò che è soggetto a CBAM: il regime definitivo parte dal 1° gennaio 2026,
+    quindi le vendite di materiale importato prima non generano obbligo. Il prezzo del
+    certificato è quello del trimestre della vendita, non una media annuale."""
     wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
     ws = wb["Vendite"]
     hdr=None; col={}
@@ -257,17 +273,29 @@ def blocco_cbam(xlsx_bytes, cfg, anno):
         orig=origine_cbam(g("Produttore"))
         if not orig:
             non_attr["tonnellate"]+=t; non_attr["righe"]+=1; continue
-        r=per.setdefault(orig,{"tonnellate":0.0,"eur_t":costo_cbam(orig,anno,cfg),"costo":0.0})
-        r["tonnellate"]+=t
+        if orig=="UE":
+            continue
+        prezzo,periodo = prezzo_trimestre(cfg, anno, d.month)
+        eur_t = costo_cbam(orig, anno, cfg, prezzo)
+        r=per.setdefault(orig,{"tonnellate":0.0,"costo":0.0,"trimestri":{}})
+        r["tonnellate"]+=t; r["costo"]+=t*eur_t
+        q=f"T{(d.month-1)//3+1}"
+        tr=r["trimestri"].setdefault(q,{"tonnellate":0.0,"eur_t":round(eur_t,2),
+                                        "prezzo":prezzo,"periodo":periodo,"costo":0.0})
+        tr["tonnellate"]+=t; tr["costo"]+=t*eur_t
     wb.close()
     for orig,r in per.items():
-        r["costo"]=r["tonnellate"]*r["eur_t"]
-        r["tonnellate"]=round(r["tonnellate"],1); r["eur_t"]=round(r["eur_t"],2); r["costo"]=round(r["costo"])
+        r["eur_t"]=round(r["costo"]/r["tonnellate"],2) if r["tonnellate"] else 0
+        r["tonnellate"]=round(r["tonnellate"],1); r["costo"]=round(r["costo"])
+        for q,tr in r["trimestri"].items():
+            tr["tonnellate"]=round(tr["tonnellate"],1); tr["costo"]=round(tr["costo"])
     non_attr["tonnellate"]=round(non_attr["tonnellate"],1)
     return {"anno":anno, "per_origine":per, "non_attribuito":non_attr,
             "totale_costo":round(sum(r["costo"] for r in per.values())),
             "totale_tonnellate":round(sum(r["tonnellate"] for r in per.values()),1),
             "prezzo_certificato":cfg.get("prezzo_certificato"),
+            "prezzi_trimestre":{p.get("periodo"):p.get("valore") for p in (cfg.get("prezzo_certificato_storico") or [])},
+            "nota":"Solo vendite dell'anno con origine soggetta a CBAM. Il regime definitivo decorre dal 1° gennaio 2026.",
             "aggiornato":cfg.get("aggiornato")}
 
 def blocco_commerciale(xlsx_bytes, offerte, documenti, anno):
