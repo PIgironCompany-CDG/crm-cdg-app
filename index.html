@@ -125,6 +125,18 @@
   .pill.task{background:#eef4ff}
   .ptag{display:inline-block;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--mid);margin-bottom:4px}
   .plink{color:var(--blue);cursor:pointer;text-decoration:underline}
+  /* OFFERTE: form compatto, parametri fissi bloccati */
+  .duecol{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end}
+  .cgrid2{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px}
+  .cgrid2 .fl{margin:6px 0 2px}
+  .fi.ro{background:#f4f6f8;color:var(--mid);border-style:dashed}
+  .fisse{max-height:0;overflow:hidden;transition:max-height .2s;opacity:.85}
+  .fisse.aperta{max-height:900px;margin-top:8px}
+  .chk{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mid);padding-bottom:10px;white-space:nowrap}
+  .chk input{width:auto}
+  .costibox{margin-top:12px;background:var(--light);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .totone{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:15px;display:flex;justify-content:space-between}
+  .totone b{font-size:17px}
   /* CALENDARIO */
   .calbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 16px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:96px;z-index:3}
   .calbar .sp{flex:1}
@@ -318,7 +330,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "19";
+const APP_VERSION = "20";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -470,19 +482,26 @@ function openDrawer(c){
     return `<label class="fl">${label}</label><select class="fi" id="ed_${id}">${o}</select>`;};
   d.innerHTML=`<div class="dh"><button class="close" onclick="closeDrawer()">×</button>
       <h2>${esc(c.ragione)}</h2><div class="sub">${esc(c.codice)} · ${esc(c.settore)} · ${esc(c.provincia)}</div></div>
-    <div class="sec"><h3>Anagrafica e contatti</h3>
-      ${inp("ragione","Ragione sociale",c.ragione)}
-      ${inp("piva","P.IVA",c.piva)}
-      ${sel("settore","Settore",c.settore,["Fonderia","Acciaieria","Trading"])}
-      ${inp("referente","Referente acquisti",c.referente)}
+    <div class="sec"><h3>Contatti
+        <button type="button" class="addbtn" id="an_edit" title="Modifica i dati anagrafici">✎ dati anagrafici</button></h3>
+      <div class="cgrid2">
+        <div><label class="fl">Referente acquisti</label><input class="fi" id="ed_referente" value="${escAttr(c.referente)}"></div>
+        <div><label class="fl">Telefono</label><input class="fi" id="ed_telefono" value="${escAttr(c.telefono)}"></div>
+      </div>
       ${inp("email","Email",c.email)}
-      ${inp("telefono","Telefono",c.telefono)}
-      ${inp("proprieta","Proprietà",c.proprieta)}
-      ${inp("indirizzo","Indirizzo",c.indirizzo)}
-      ${inp("comune","Comune",c.comune)}
-      ${inp("provincia","Provincia",c.provincia)}
-      ${inp("regione","Regione",c.regione)}
-      ${inp("owner","Owner",c.owner)}
+      <div id="an_fisse" class="fisse">
+        <div class="cgrid2">
+          <div><label class="fl">Ragione sociale</label><input class="fi ro" id="ed_ragione" value="${escAttr(c.ragione)}" disabled></div>
+          <div><label class="fl">P.IVA</label><input class="fi ro" id="ed_piva" value="${escAttr(c.piva)}" disabled></div>
+          <div><label class="fl">Settore</label><input class="fi ro" id="ed_settore" value="${escAttr(c.settore)}" disabled></div>
+          <div><label class="fl">Proprietà</label><input class="fi ro" id="ed_proprieta" value="${escAttr(c.proprieta)}" disabled></div>
+          <div><label class="fl">Comune</label><input class="fi ro" id="ed_comune" value="${escAttr(c.comune)}" disabled></div>
+          <div><label class="fl">Provincia</label><input class="fi ro" id="ed_provincia" value="${escAttr(c.provincia)}" disabled></div>
+          <div><label class="fl">Regione</label><input class="fi ro" id="ed_regione" value="${escAttr(c.regione)}" disabled></div>
+          <div><label class="fl">Owner</label><input class="fi ro" id="ed_owner" value="${escAttr(c.owner)}" disabled></div>
+        </div>
+        <label class="fl">Indirizzo</label><input class="fi ro" id="ed_indirizzo" value="${escAttr(c.indirizzo)}" disabled>
+      </div>
     </div>
     <div class="sec"><h3>Stato commerciale</h3>
       ${sel("tipologia","Tipologia",c.tipologia,["Cliente caldo","Cliente raffreddamento","Cliente fermo","Ex-cliente storico","Prospect nuovo"])}
@@ -514,6 +533,15 @@ function openDrawer(c){
     <div class="savebar"><button id="saveBtn">Salva modifiche</button><span id="saveMsg"></span></div>`;
   document.getElementById('saveBtn').onclick=saveEdit;
   renderInter(c.codice);
+  // matita: sblocca i dati anagrafici, che di norma restano fermi
+  const ae=document.getElementById('an_edit');
+  if(ae) ae.onclick=function(){
+    const box=document.getElementById('an_fisse');
+    const bloccati=box.querySelectorAll('input[disabled]').length>0;
+    box.querySelectorAll('input').forEach(i=>{ i.disabled=!bloccati; i.classList.toggle('ro',!bloccati); });
+    box.classList.toggle('aperta',bloccati);
+    this.textContent=bloccati?'✓ blocca dati anagrafici':'✎ dati anagrafici';
+  };
   d.classList.add('open'); document.getElementById('ov').classList.add('open');
 }
 async function saveEdit(){
@@ -705,28 +733,43 @@ async function addInter(tp){
 // Il conteggio riproduce il foglio "Conteggio PREZZI.xlsx" voce per voce: chi lo compila
 // ritrova le stesse righe che usa in Excel. Il CBAM, che lì non c'era, viene calcolato
 // dai parametri ufficiali e confrontato col margine: è il controllo che prima mancava.
-const VOCI_COSTO=[
-  ["costo_cif","Costo CIF ($/t)",true],
-  ["cambio","Cambio $/€",true],
-  ["dazio","Dazio (€/t)",true],
-  ["sbarco","Sbarco (€/t)",true],
-  ["doganali","Doganali (€/t)",true],
-  ["spedizioniere","Spedizioniere (€/t)",true],
-  ["sped_doganale","Spedizioniere doganale (€/t)",true],
-  ["draft","Draft / pesatura (€/t)",true],
-  ["calo_pc","Calo peso (%)",true],
-  ["trasporto","Trasporto in fonderia (€/t)",true],
-  ["fin_stock","Finanziamento stock (€/t)",true],
-  ["assicurazione","Costo assicurazione (€/t)",true],
-  ["commissioni","Commissioni (€/t)",true],
-  ["spese_banc","Spese bancarie (€/t)",true],
-  ["tasso_viaggio","Tasso viaggio e $ (%)",true],
-  ["tasso_pagamento","Tasso pagamento e sosta (%)",true],
-  ["gg_viaggio","Giorni viaggio",true],
-  ["gg_giacenza","Giorni giacenza merce",true],
-  ["gg_pagamento","Giorni pagamento",true],
-  ["comm_incasso","Commissione di incasso (€/t)",true]
+// Campi sempre in evidenza: sono quelli che cambiano a ogni trattativa.
+const VOCI_RAPIDE=[
+  ["costo_cif","Costo CIF ($/t)"],
+  ["cambio","Cambio $/€"],
+  ["gg_viaggio","Giorni viaggio"],
+  ["gg_giacenza","Giorni giacenza"],
+  ["gg_pagamento","Giorni pagamento"]
 ];
+// Parametri stabili: restano bloccati finché non si preme la matita.
+const VOCI_FISSE=[
+  ["dazio","Dazio (€/t)"],
+  ["sbarco","Sbarco (€/t)"],
+  ["doganali","Doganali (€/t)"],
+  ["spedizioniere","Spedizioniere (€/t)"],
+  ["sped_doganale","Sped. doganale (€/t)"],
+  ["draft","Draft / pesatura (€/t)"],
+  ["calo_pc","Calo peso (%)"],
+  ["trasporto","Trasporto in fonderia (€/t)"],
+  ["fin_stock","Finanziamento stock (€/t)"],
+  ["assicurazione","Assicurazione (€/t)"],
+  ["commissioni","Commissioni (€/t)"],
+  ["spese_banc","Spese bancarie (€/t)"],
+  ["tasso_viaggio","Tasso viaggio (%)"],
+  ["tasso_pagamento","Tasso pagamento (%)"],
+  ["comm_incasso","Commissione incasso (€/t)"]
+];
+const VOCI_COSTO=VOCI_RAPIDE.concat(VOCI_FISSE);
+// Listino trasporti UNICOAL (partenza Marghera): destinazione -> €/t 2026.
+// Si aggiorna ripubblicando l'app quando esce il listino nuovo.
+const TRASPORTI={"ALBIGNASEGO": {"MARGHERA": 8.1}, "ALBINO": {"MARGHERA": 16.8}, "AOSTA": {"MARGHERA": 31.5}, "ASSISI": {"MARGHERA": 34.65}, "BARBERINO VAL D'ELSA": {"MARGHERA": 20.83}, "BARIANO": {"MARGHERA": 16.8}, "BESNATE": {"MARGHERA": 20.0}, "BORGO VALSUGANA": {"MARGHERA": 11.0}, "BRESCIA": {"MARGHERA": 13.65}, "BRUNELLO": {"MARGHERA": 20.0}, "CAMIN": {"MARGHERA": 6.5}, "CAMPOSAMPIERO": {"MARGHERA": 7.53}, "CASTEGNATO": {"MARGHERA": 13.65}, "CASTELLO DI BRIANZA": {"MARGHERA": 20.0}, "CASTENEDOLO": {"MARGHERA": 13.65}, "CIVIDALE DEL FRIULI": {"MARGHERA": 12.73}, "COLLESALVETTI": {"MARGHERA": 20.83}, "COMUN NUOVO": {"MARGHERA": 16.8}, "CREVALCORE": {"MARGHERA": 13.23}, "DAIRAGO": {"MARGHERA": 20.0}, "DOMODOSSOLA": {"MARGHERA": 25.46}, "DOZZA": {"MARGHERA": 13.89}, "DUEVILLE": {"MARGHERA": 8.93}, "FANO": {"MARGHERA": 17.36}, "FERRERE": {"MARGHERA": 28.35}, "FORLI'": {"MARGHERA": 14.47}, "GAVARDO": {"MARGHERA": 13.65}, "JESI": {"MARGHERA": 520.93}, "LALLIO": {"MARGHERA": 17.71}, "LAVENONE": {"MARGHERA": 13.65}, "LEGNANO": {"MARGHERA": 20.0}, "LESSONA": {"MARGHERA": 23.15}, "LIMBIATE": {"MARGHERA": 20.0}, "LIMIDI DI SOLIERA": {"MARGHERA": 13.65}, "LONATE POZZOLO": {"MARGHERA": 20.0}, "LOVADINA": {"MARGHERA": 8.4}, "MAERNE": {"MARGHERA": 367.5}, "MAGENTA": {"MARGHERA": 20.0}, "MALO": {"MARGHERA": 8.68}, "MANIAGO": {"MARGHERA": 11.55}, "MAPELLO": {"MARGHERA": 16.8}, "MINERBE": {"MARGHERA": 11.03}, "MODENA": {"MARGHERA": 13.65}, "MONTAGNANA": {"MARGHERA": 8.1}, "MONTORSO VICENTINO": {"MARGHERA": 8.68}, "OLGINATE": {"MARGHERA": 17.71}, "OMEGNA": {"MARGHERA": 25.46}, "PALAZZOLO SULL'OGLIO": {"MARGHERA": 13.65}, "PARONA": {"MARGHERA": 20.0}, "ROCCA DE' BALDI": {"MARGHERA": 27.3}, "RONCADELLE": {"MARGHERA": 13.65}, "ROVEREDO IN PIANO": {"MARGHERA": 12.6}, "ROVIGO": {"MARGHERA": 8.68}, "SAN BONIFACIO": {"MARGHERA": 11.55}, "SAN GIORGIO SU LEGNANO": {"MARGHERA": 20.0}, "SAN GIOVANNI LUPATOTO": {"MARGHERA": 10.99}, "SAN VITO DI LEGUZZANO": {"MARGHERA": 8.1}, "SAREZZO": {"MARGHERA": 13.65}, "SEGUSINO": {"MARGHERA": 10.42}, "TRAVAGLIATO": {"MARGHERA": 12.39}, "VARESE": {"ROVEREDO IN PIANO": 20.86}, "VICENZA": {"MARGHERA": 8.1}, "VILLAFRANCA DI VERONA": {"MARGHERA": 10.99}, "VILLALVERNIA": {"MARGHERA": 23.15}};
+function costoTrasporto(comune){
+  if(!comune) return null;
+  const k=String(comune).trim().toUpperCase();
+  const r=TRASPORTI[k];
+  if(!r) return null;
+  return r["MARGHERA"]!=null ? r["MARGHERA"] : Object.values(r)[0];
+}
 const DEFAULT_OFF={costo_cif:0,cambio:1.15,dazio:0,sbarco:6.5,doganali:0.88,spedizioniere:0.35,
   sped_doganale:0.15,draft:0.05,calo_pc:0,trasporto:0,fin_stock:2,assicurazione:0,commissioni:2,
   spese_banc:0,tasso_viaggio:5,tasso_pagamento:3.5,gg_viaggio:30,gg_giacenza:30,gg_pagamento:30,
@@ -793,7 +836,7 @@ function renderOff(){
     d.innerHTML=`<div class="top"><div><div class="rag">${esc(o.cliente||'(senza cliente)')}</div>
         <div class="meta">${esc(o.numero||'')} · ${esc(o.data||'')}</div></div>
         <span class="tag ${o.stato==='accettata'?'t-caldo':(o.stato==='persa'?'t-fermo':(o.stato==='inviata'?'t-prospect':'t-ex'))}">${esc(o.stato||'bozza')}</span></div>
-      <div class="row"><b>${esc(o.qualita||'—')}</b> ${esc(o.origine||'')} · ${eurF(o.quantita,0)} t</div>
+      <div class="row"><b>${esc(o.qualita||'—')}</b> ${esc(o.origine||'')} · ${o.quantita_libera?"a Vs. necessità":(eurF(o.quantita,0)+" t")}</div>
       <div class="row">Prezzo <b>${eurF(o.prezzo_vendita)} €/t</b> · margine
         <b style="color:${c.margine>0?'#1f8a4c':'#c0392b'}">${eurF(c.margine)} €/t</b></div>
       <div class="row">+ CBAM ${eurF(cb)} €/t · al cliente <b>${eurF(valNum(o.prezzo_vendita)+cb)} €/t</b></div>`;
@@ -813,27 +856,48 @@ function apriOff(id){
   const inp=(k,l,v,t)=>`<label class="fl">${l}</label><input class="fi" id="of_${k}" type="${t||'text'}" value="${escAttr(v==null?'':v)}">`;
   const selv=(k,l,v,opts)=>`<label class="fl">${l}</label><select class="fi" id="of_${k}">`+
     opts.map(x=>`<option value="${escAttr(x)}"${String(x)===String(v||"")?" selected":""}>${esc(x)}</option>`).join("")+`</select>`;
+  const optCli=[`<option value="">— scegli il cliente —</option>`].concat(
+    cli.map(c=>`<option value="${escAttr(c.cod)}"${c.cod===o.codice?" selected":""}>${esc(c.rag)}</option>`)).join("");
   d.innerHTML=`<div class="dh"><button class="close" onclick="closeDrawer()">×</button>
       <h2>${isNew?'Nuova offerta':esc(o.numero||'Offerta')}</h2>
-      <div class="sub">${isNew?'Compila il conteggio: il margine si aggiorna da solo':esc(o.cliente||'')+' · '+esc(o.stato||'')}</div></div>
+      <div class="sub">${isNew?'Compila il conteggio: costi e margine si aggiornano da soli':esc(o.cliente||'')+' · '+esc(o.stato||'')}</div></div>
     <div class="sec"><h3>Intestazione</h3>
-      ${selv('codice','Cliente',o.codice,[""].concat(cli.map(c=>c.cod)).map(c=>c))}
+      <label class="fl">Cliente</label><select class="fi" id="of_codice">${optCli}</select>
       <label class="fl">Referente (a chi è indirizzata)</label><input class="fi" id="of_referente" value="${escAttr(o.referente||'')}">
       ${selv('qualita','Materiale',o.qualita,qualita)}
       ${selv('origine','Origine',o.origine,origini)}
-      ${inp('quantita','Quantità (t)',o.quantita,'number')}
-      ${inp('resa','Resa',o.resa)}
+      <label class="fl">Quantità</label>
+      <div class="duecol">
+        <input class="fi" id="of_quantita" type="number" value="${escAttr(o.quantita||'')}" ${o.quantita_libera?'disabled':''}>
+        <label class="chk"><input type="checkbox" id="of_qlibera" ${o.quantita_libera?'checked':''}> a Vs. necessità</label>
+      </div>
+      <label class="fl">Resa</label><select class="fi" id="of_resa_tipo">
+        <option value="marghera"${(o.resa_tipo||'marghera')==='marghera'?' selected':''}>FCA Porto di Marghera</option>
+        <option value="fonderia"${o.resa_tipo==='fonderia'?' selected':''}>Franco fonderia (trasporto incluso)</option>
+        <option value="altra"${o.resa_tipo==='altra'?' selected':''}>Altra resa (testo libero)</option>
+      </select>
+      <div id="of_resa_info" class="pmeta"></div>
+      <input class="fi hidden" id="of_resa" value="${escAttr(o.resa||'FCA Porto di Marghera')}">
       ${inp('consegna','Consegna',o.consegna)}
       ${inp('pagamento','Pagamento',o.pagamento)}
-      ${inp('data','Data offerta',o.data,'date')}
-      ${inp('validita','Valida fino al',o.validita,'date')}
+      <div class="duecol">${inp('data','Data offerta',o.data,'date')}${inp('validita','Valida fino al',o.validita,'date')}</div>
       ${inp('validita_ora','Ora validità',o.validita_ora||'12:00','time')}
     </div>
-    <div class="sec"><h3>Conteggio costi</h3>
-      ${VOCI_COSTO.map(v=>inp(v[0],v[1],o[v[0]],'number')).join("")}
+    <div class="sec"><h3>Conteggio costi
+        <button type="button" class="addbtn" id="of_edit" title="Modifica i parametri fissi">✎ parametri</button></h3>
+      <div class="cgrid2">${VOCI_RAPIDE.map(v=>
+        `<div><label class="fl">${v[1]}</label><input class="fi" id="of_${v[0]}" type="number" value="${escAttr(o[v[0]])}"></div>`).join("")}</div>
+      <div id="of_fisse" class="fisse">
+        <div class="cgrid2">${VOCI_FISSE.map(v=>
+          `<div><label class="fl">${v[1]}</label><input class="fi ro" id="of_${v[0]}" type="number" value="${escAttr(o[v[0]])}" disabled></div>`).join("")}</div>
+      </div>
+      <div id="of_costi"></div>
     </div>
-    <div class="sec"><h3>Prezzo e margine</h3>
-      ${inp('prezzo_vendita','Prezzo di vendita (€/t)',o.prezzo_vendita,'number')}
+    <div class="sec"><h3>Prezzo di vendita</h3>
+      <div class="duecol">
+        <div><label class="fl">Prezzo (€/t)</label><input class="fi" id="of_prezzo_vendita" type="number" value="${escAttr(o.prezzo_vendita)}"></div>
+        <div><label class="fl">oppure margine voluto (%)</label><input class="fi" id="of_margine_obiettivo" type="number" placeholder="es. 4"></div>
+      </div>
       <div id="of_riepilogo"></div>
     </div>
     <div class="sec"><h3>CBAM</h3>
@@ -848,18 +912,82 @@ function apriOff(id){
       ${!isNew?`<button class="cancelpill" onclick="delOff('${id}')">Elimina</button>`:''}
       <span id="ofMsg"></span></div>`;
   document.getElementById('ofBtn').onclick=()=>salvaOff(id);
-  // ricalcolo dal vivo a ogni modifica
+  // matita: sblocca i parametri stabili
+  document.getElementById('of_edit').onclick=function(){
+    const box=document.getElementById('of_fisse');
+    const bloccati=box.querySelectorAll('input[disabled]').length>0;
+    box.querySelectorAll('input').forEach(i=>{ i.disabled=!bloccati; i.classList.toggle('ro',!bloccati); });
+    box.classList.toggle('aperta',bloccati);
+    this.textContent=bloccati?'✓ blocca parametri':'✎ parametri';
+  };
+  // quantità "a Vs. necessità"
+  document.getElementById('of_qlibera').addEventListener('change',function(){
+    const q=document.getElementById('of_quantita');
+    q.disabled=this.checked; if(this.checked) q.value='';
+    aggiornaRiepilogo();
+  });
+  // resa: se franco fonderia, il trasporto arriva dal listino in base al comune del cliente
+  document.getElementById('of_resa_tipo').addEventListener('change',applicaResa);
+  document.getElementById('of_codice').addEventListener('change',applicaResa);
+  // prezzo e margine obiettivo si inseguono
+  document.getElementById('of_margine_obiettivo').addEventListener('input',function(){
+    const mo=valNum(this.value); if(!this.value){ aggiornaRiepilogo(); return; }
+    const c=conteggio(leggiOff());
+    document.getElementById('of_prezzo_vendita').value=(c.costo_tot*(1+mo/100)).toFixed(2);
+    aggiornaRiepilogo();
+  });
+  document.getElementById('of_prezzo_vendita').addEventListener('input',function(){
+    const mo=document.getElementById('of_margine_obiettivo'); if(mo) mo.value='';
+  });
   VOCI_COSTO.map(v=>v[0]).concat(['prezzo_vendita','origine','data','cbam_manuale','quantita'])
     .forEach(k=>{const el=document.getElementById('of_'+k); if(el) el.addEventListener('input',aggiornaRiepilogo);});
+  applicaResa();
   aggiornaRiepilogo();
   d.classList.add('open'); document.getElementById('ov').classList.add('open');
+}
+// La resa decide se il trasporto entra nel costo: franco fonderia lo prende dal
+// listino UNICOAL usando il comune del cliente, così il prezzo è già comprensivo.
+function applicaResa(){
+  const t=document.getElementById('of_resa_tipo'); if(!t) return;
+  const cod=document.getElementById('of_codice').value;
+  const cli=DATA.find(c=>c.codice===cod)||{};
+  const info=document.getElementById('of_resa_info');
+  const resa=document.getElementById('of_resa');
+  const tr=document.getElementById('of_trasporto');
+  if(t.value==='fonderia'){
+    const costo=costoTrasporto(cli.comune);
+    if(costo!=null){
+      if(tr) tr.value=costo;
+      resa.value="Franco Vs. stabilimento";
+      info.textContent=`Trasporto da listino per ${cli.comune}: ${eurF(costo)} €/t (incluso nel costo).`;
+    }else{
+      resa.value="Franco Vs. stabilimento";
+      info.innerHTML=cli.comune
+        ? `<b>${esc(cli.comune)}</b> non è nel listino trasporti: inserisci il costo a mano nei parametri (matita).`
+        : `Scegli il cliente per ricavare il trasporto dal listino.`;
+    }
+    resa.classList.add('hidden');
+  }else if(t.value==='marghera'){
+    if(tr) tr.value=0;
+    resa.value="FCA Porto di Marghera";
+    info.textContent="Ritiro a Marghera: nessun costo di trasporto a nostro carico.";
+    resa.classList.add('hidden');
+  }else{
+    info.textContent="Scrivi la resa come deve comparire nell'offerta:";
+    resa.classList.remove('hidden');
+  }
+  aggiornaRiepilogo();
 }
 function leggiOff(){
   const g=k=>{const e=document.getElementById('of_'+k); return e?e.value:"";};
   const o={};
   VOCI_COSTO.forEach(v=>o[v[0]]=valNum(g(v[0])));
   ['codice','referente','qualita','origine','resa','consegna','pagamento','data','validita','validita_ora','note'].forEach(k=>o[k]=g(k));
-  o.quantita=valNum(g('quantita')); o.prezzo_vendita=valNum(g('prezzo_vendita'));
+  const ql=document.getElementById('of_qlibera');
+  o.quantita_libera=!!(ql&&ql.checked);
+  o.resa_tipo=g('resa_tipo');
+  o.quantita=o.quantita_libera?0:valNum(g('quantita'));
+  o.prezzo_vendita=valNum(g('prezzo_vendita'));
   o.cbam_certificato=valNum(g('cbam_certificato'));
   const cm=g('cbam_manuale'); o.cbam_manuale=(cm===""||cm==null)?null:valNum(cm);
   o.cliente=(DATA.find(c=>c.codice===o.codice)||{}).ragione||"";
@@ -870,16 +998,25 @@ function aggiornaRiepilogo(){
   const anno=new Date(o.data||Date.now()).getFullYear();
   const cbA=calcolaCbam(o.origine,anno,false);
   const cb=o.cbam_manuale!=null?o.cbam_manuale:cbA.eur_t;
+  // I costi si leggono PRIMA del prezzo: è da lì che si decide quanto quotare.
+  const costi=document.getElementById('of_costi');
+  if(costi) costi.innerHTML=`<div class="costibox">
+      <div class="kv">
+        <div class="k">Costo CIF €</div><div>${eurF(c.cif_eur)}</div>
+        <div class="k">Dazio, sbarco e doganali</div><div>${eurF(c.dazio+c.sbarcoTot)}</div>
+        <div class="k">Trasporto e oneri</div><div>${eurF(c.tot3-c.tot2)}</div>
+        <div class="k">Interessi</div><div>${eurF(c.interessi)}</div>
+      </div>
+      <div class="totone">Costo totale <b>${eurF(c.costo_tot)} €/t</b></div>
+      <div class="pmeta">Prezzo indicativo: ${eurF(c.costo_tot*1.02)} a +2% · ${eurF(c.costo_tot*1.04)} a +4% · ${eurF(c.costo_tot*1.06)} a +6%</div>
+    </div>`;
   const box=document.getElementById('of_riepilogo');
+  const q=o.quantita_libera?0:o.quantita;
   if(box) box.innerHTML=`<div class="kv" style="margin-top:10px">
-      <div class="k">Costo CIF €</div><div>${eurF(c.cif_eur)}</div>
-      <div class="k">Sdoganamento e sbarco</div><div>${eurF(c.dazio+c.sbarcoTot)}</div>
-      <div class="k">Trasporto e oneri</div><div>${eurF(c.tot3-c.tot2)}</div>
-      <div class="k">Interessi</div><div>${eurF(c.interessi)}</div>
-      <div class="k"><b>Costo totale</b></div><div><b>${eurF(c.costo_tot)} €/t</b></div>
       <div class="k"><b>Margine</b></div><div><b style="color:${c.margine>0?'#1f8a4c':'#c0392b'}">${eurF(c.margine)} €/t (${eurF(c.margine_pc)}%)</b></div>
       <div class="k">Ritorno su base annua</div><div>${eurF(c.ritorno)}%</div>
-      <div class="k">Su ${eurF(o.quantita,0)} t</div><div><b>${eurF(c.margine*o.quantita)} €</b></div>
+      ${q?`<div class="k">Margine su ${eurF(q,0)} t</div><div><b>${eurF(c.margine*q)} €</b></div>`:
+          `<div class="k">Quantità</div><div>a Vs. necessità</div>`}
     </div>`;
   const cbox=document.getElementById('of_cbam');
   if(cbox){
@@ -942,7 +1079,7 @@ function testoOfferta(o){
       ${r("Origine:",`<b>${esc(o.origine||"")}</b>`)}
       ${r("Prezzo:",`Euro <b>${eurF(o.prezzo_vendita)}/Mt.</b> ${esc(o.resa||"")}`+
          (cb>0?`<div class="sub2">+ CBAM €/Mt. ${eurF(cb)} (salvo conguaglio) posto il costo di € ${eurF(cert)} per certificato ETS</div>`:""))}
-      ${r("Quantità:",`<b>Mt. ${eurF(o.quantita,0)}</b>`)}
+      ${r("Quantità:",`<b>${o.quantita_libera?"A Vs. necessità":("Mt. "+eurF(o.quantita,0))}</b>`)}
       ${r("Consegna:",`<b>${esc(o.consegna||"")}</b>`)}
       ${r("Pagamento:",`<b>${esc(o.pagamento||"")}</b>`)}
       ${r("Validità:",`<b>HRS ${esc(o.validita_ora||"12:00")} del ${dt(o.validita)}</b>, oltre soggetta a ns. riconferma finale.`)}
@@ -1016,7 +1153,7 @@ function bloccoOfferte(cod){
     return `<div class="attrow">
       <div class="when">${esc(o.data||"")}<br><span class="badge2">${esc(o.stato||"bozza")}</span></div>
       <div style="flex:1">
-        <b>${esc(o.numero||"")}</b> · ${esc(o.qualita||"")} ${esc(o.origine||"")} · ${eurF(o.quantita,0)} t
+        <b>${esc(o.numero||"")}</b> · ${esc(o.qualita||"")} ${esc(o.origine||"")} · ${o.quantita_libera?"a Vs. necessità":(eurF(o.quantita,0)+" t")}
         <div class="pmeta">${eurF(o.prezzo_vendita)} €/t${cb?` + CBAM ${eurF(cb)}`:""} ·
           margine ${eurF(o.margine)} €/t${o.validita?` · valida al ${esc(o.validita)}`:""}</div>
       </div>
