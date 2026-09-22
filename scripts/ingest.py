@@ -100,6 +100,103 @@ def parse_magazzino(b):
     return {"magazzino":{"disponibile_totale":round(sum(v["disponibile"] or 0 for v in voci)),"voci":voci},
             "uscite_mensili":[{"mese":m,"tonnellate":usc[m]} for m in sorted(usc)]}
 
+NAVI_RE=r'SAGA|ENTERPRISE|IZUMO|HERMES|NAREE|TBN|SELECTA|MANX|KARANFIL|ELLAN|MALLIKA|STAR|LADY|OCEAN|BULK|SELECT'
+# origine del materiale per il CBAM, dedotta dal nome del foglio del magazzino
+ORIGINE_FOGLIO=[("BRASIL","BRASILE"),("ZAPO","UCRAINA"),("UCRAIN","UCRAINA"),
+                ("RUSS","RUSSIA"),("KOSAYA","RUSSIA"),("URAL","RUSSIA")]
+
+def prezzo_mt(s):
+    """'$ 435,00/Mt' -> (435.0, 'USD'). Gestisce anche '417,00 €/Mt'."""
+    m=re.search(r'([\d.,]+)\s*[€$]?\s*/?\s*Mt', str(s), re.I)
+    if not m: return None,None
+    v=m.group(1).replace(".","").replace(",",".")
+    try: v=float(v)
+    except Exception: return None,None
+    return v, ("USD" if "$" in str(s) else ("EUR" if "€" in str(s) else None))
+
+def parse_navi(b, cambio=1.15):
+    """Un blocco per nave: quanto è arrivato, a che costo, a chi è stato venduto e a quanto.
+
+    Serve a leggere il risultato economico di ogni carico, non solo la giacenza."""
+    wb=openpyxl.load_workbook(io.BytesIO(b),data_only=True); navi=[]
+    for ws in wb.worksheets:
+        if ws.title.strip().lower().startswith("uscite"): continue
+        origine=next((o for k,o in ORIGINE_FOGLIO if k in ws.title.upper()), None)
+        righe=[list(r) for r in ws.iter_rows(values_only=True)]
+        cur=None
+        for i,r in enumerate(righe):
+            cells=[("" if c is None else str(c).strip()) for c in r]
+            testo=" ".join(cells)
+            if re.search(r'PIG IRON|BASIC BM|NODULAR|SFEROID|EMATITE|FOUNDRY', testo) \
+               and "CLIENTI" not in testo and len([c for c in cells if c])<=2:
+                if cur: navi.append(cur)
+                cur={"foglio":ws.title.strip(),"origine":origine,
+                     "prodotto":next((c for c in cells if c),""),"nave":None,
+                     "costo":None,"valuta_costo":None,"totale":None,"righe":[],"disponibile":None}
+                continue
+            if cur is None: continue
+            for c in cells:
+                if c and re.search(NAVI_RE,c,re.I) and not re.search(r'\d',c): cur["nave"]=c
+                if c and re.search(r'^\s*[€$]\s*[\d.,]+\s*/?\s*Mt', c, re.I):
+                    v,val=prezzo_mt(c)
+                    if v: cur["costo"]=v; cur["valuta_costo"]=val or "USD"
+            if "totale nave" in testo.lower():
+                for j in range(i+1, min(i+4,len(righe))):
+                    nums=[x for x in righe[j] if isinstance(x,(int,float))]
+                    if nums: cur["totale"]=nums[0]; break
+            if "disponibilit" in testo.lower():
+                nums=[x for x in r if isinstance(x,(int,float))]
+                if nums: cur["disponibile"]=nums[0]
+            cli=cells[5] if len(cells)>5 else ""
+            if cli and cli.upper()==cli and len(cli)>2 and "CLIENTI" not in cli \
+               and not re.search(r'MT|TOTALE|DISPONIB', cli):
+                pv,val=prezzo_mt(cells[7] if len(cells)>7 else "")
+                q=None
+                for x in (r[8:11] if len(r)>8 else []):
+                    if isinstance(x,(int,float)): q=x; break
+                if q: cur["righe"].append({"cliente":cli,"prezzo":pv,"valuta":val,"quantita":q})
+        if cur: navi.append(cur)
+    wb.close()
+    # conto economico di ogni carico
+    for n in navi:
+        eur=lambda v,val: (v/cambio if val=="USD" else v) if v is not None else None
+        venduto=sum(x["quantita"] or 0 for x in n["righe"])
+        ricavo=0.0; senza_prezzo=0
+        for x in n["righe"]:
+            p=eur(x["prezzo"], x["valuta"] or "EUR")
+            if p is None: senza_prezzo+=1; continue
+            ricavo+=p*(x["quantita"] or 0)
+        costo_t=eur(n["costo"], n["valuta_costo"] or "USD")
+        n["venduto"]=round(venduto,1)
+        n["costo_eur_t"]=round(costo_t,2) if costo_t else None
+        n["ricavo_eur"]=round(ricavo)
+        n["costo_venduto_eur"]=round(costo_t*venduto) if costo_t else None
+        n["margine_eur"]=round(ricavo-costo_t*venduto) if costo_t else None
+        n["margine_eur_t"]=round((ricavo/venduto-costo_t),2) if (costo_t and venduto) else None
+        n["righe_senza_prezzo"]=senza_prezzo
+        n["clienti"]=len(n["righe"])
+        # Il magazzino è un foglio di lavoro visivo, non una tabella: prezzi e quantità
+        # possono disallinearsi. Si marca il carico come da verificare invece di
+        # spacciare per perdita quello che può essere un dato letto male.
+        avvisi=[]
+        if senza_prezzo: avvisi.append(f"{senza_prezzo} righe senza prezzo")
+        if n["totale"] and venduto>n["totale"]*1.02: avvisi.append("venduto oltre il carico")
+        if costo_t and venduto:
+            medio=ricavo/venduto
+            if medio < costo_t*0.85: avvisi.append("prezzo medio molto sotto il costo")
+            if medio > costo_t*1.60: avvisi.append("prezzo medio molto sopra il costo")
+        if not costo_t: avvisi.append("costo di acquisto non rilevato")
+        n["avvisi"]=avvisi
+        n["attendibile"]=not avvisi
+    ok=[n for n in navi if n["attendibile"]]
+    return {"cambio":cambio,"navi":navi,
+            "importato_totale":round(sum(n["totale"] or 0 for n in navi),1),
+            "venduto_totale":round(sum(n["venduto"] for n in navi),1),
+            "disponibile_totale":round(sum(n["disponibile"] or 0 for n in navi),1),
+            "margine_attendibile":round(sum(n["margine_eur"] or 0 for n in ok)),
+            "venduto_attendibile":round(sum(n["venduto"] for n in ok),1),
+            "carichi_attendibili":len(ok),"carichi_da_verificare":len(navi)-len(ok)}
+
 def parse_uscite(b):
     wb=openpyxl.load_workbook(io.BytesIO(b),data_only=True)
     year=str(datetime.date.today().year); ws=wb[year] if year in wb.sheetnames else wb.worksheets[-1]
@@ -656,7 +753,14 @@ def main():
         name=e["name"]; kind=classify(name); print(f" - {name} -> {kind}")
         if kind=="esposizione": op["esposizione"]=parse_esposizione(dl(t,e["path_lower"])); changed=True
         elif kind=="magazzino":
-            d=parse_magazzino(dl(t,e["path_lower"])); op["magazzino"]=d["magazzino"]; op["uscite_mensili"]=d["uscite_mensili"]; changed=True
+            raw=dl(t,e["path_lower"])
+            d=parse_magazzino(raw); op["magazzino"]=d["magazzino"]; op["uscite_mensili"]=d["uscite_mensili"]
+            try:
+                op["navi"]=parse_navi(raw)
+                print(f"     navi: {len(op['navi']['navi'])} carichi, importato {op['navi']['importato_totale']:,.0f} t")
+            except Exception as ex:
+                print("     navi non elaborate:",ex)
+            changed=True
         elif kind=="uscite":
             if not op.get("uscite_mensili"): op["uscite_mensili"]=parse_uscite(dl(t,e["path_lower"])); changed=True
     if changed:

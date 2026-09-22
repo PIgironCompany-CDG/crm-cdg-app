@@ -339,6 +339,9 @@
         <div class="chartbox wide"><h4>Giacenze per materiale / nave</h4><table class="st" id="tbl-qual"></table></div>
         <div class="chartbox wide"><h4>Uscite mensili 2026 (t) — da contratti / opzionato</h4><div class="cwrap"><canvas id="chUscite"></canvas></div></div>
       </div>
+      <h3 class="dh3" style="margin-top:18px">Risultato per nave</h3>
+      <p class="dsubt">Costo del carico, ricavo, margine e CBAM per ogni importazione</p>
+      <div id="box-navi"></div>
     </div>
   </section>
 </div>
@@ -353,7 +356,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "24";
+const APP_VERSION = "25";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -1808,6 +1811,55 @@ function renderCbamEsposizione(){
       <p class="hint">Calcolo con valori predefiniti e benchmark colonna B. Con dati di emissione verificati l'obbligo si riduce o si azzera.</p>
     </div>`;
 }
+// Conto economico per nave: quanto è costato il carico, quanto ha reso,
+// quanto pesa il CBAM sull'origine di quel materiale.
+function renderNavi(){
+  const box=document.getElementById('box-navi'); if(!box) return;
+  const d=(OPER&&OPER.navi)||null;
+  if(!d||!d.navi||!d.navi.length){
+    box.innerHTML='<div class="pempty">Dati per nave non ancora disponibili: verranno estratti al prossimo caricamento del file magazzino.</div>';
+    return;
+  }
+  const anno=new Date().getFullYear();
+  const cbamT={};
+  (Object.keys((CBAM&&CBAM.origini)||{})).forEach(o=>{ cbamT[o]=calcolaCbam(o,anno,false).eur_t; });
+  const navi=d.navi.filter(n=>(n.totale||0)>0||(n.venduto||0)>0);
+  let cbamTot=0;
+  navi.forEach(n=>{ n._cbam=(cbamT[n.origine]||0)*(n.totale||0); cbamTot+=n._cbam; });
+  const ord=navi.slice().sort((a,b)=>(b.margine_eur||0)-(a.margine_eur||0));
+  const riga=n=>{
+    const m=n.margine_eur, mt=n.margine_eur_t;
+    const alert=!n.attendibile;
+    return `<tr${alert?' style="opacity:.62"':''}>
+      <td><b>${esc(n.nave||'—')}</b><div class="pmeta">${esc(n.prodotto||'')} · ${esc(n.origine||'origine ignota')}</div></td>
+      <td class="num">${num(Math.round(n.totale||0))}</td>
+      <td class="num">${num(Math.round(n.venduto||0))}</td>
+      <td class="num">${n.disponibile!=null?num(Math.round(n.disponibile)):'—'}</td>
+      <td class="num">${n.costo_eur_t!=null?eurF(n.costo_eur_t):'—'}</td>
+      <td class="num">${n.ricavo_eur?('€ '+num(n.ricavo_eur)):'—'}</td>
+      <td class="num">${alert?'<span class="pempty">da verificare</span>':
+          (m!=null?`<b style="color:${m>0?'#1f8a4c':'#c0392b'}">€ ${num(m)}</b>${mt!=null?`<div class="pmeta">${eurF(mt)} €/t</div>`:''}`:'—')}</td>
+      <td class="num">${n._cbam?('€ '+num(Math.round(n._cbam))):'—'}</td>
+    </tr>${alert&&n.avvisi&&n.avvisi.length?`<tr><td colspan="8" class="pmeta" style="padding-top:0">↳ ${esc(n.avvisi.join(' · '))}</td></tr>`:''}`;
+  };
+  box.innerHTML=`
+    <div class="kpis">
+      ${kpi(tons(d.importato_totale),'Importato','su '+navi.length+' carichi')}
+      ${kpi(tons(d.venduto_totale),'Venduto',tons(d.disponibile_totale)+' a magazzino')}
+      ${kpi('€ '+num(d.margine_attendibile||0),'Margine lordo',`su ${d.carichi_attendibili} carichi verificabili`)}
+      ${kpi('€ '+num(Math.round(cbamTot)),'CBAM sui carichi','stima '+anno+' sulle tonnellate importate')}
+    </div>
+    <div class="chartbox wide"><h4>Conto economico per nave</h4>
+      <table class="st">
+        <tr><th>Nave</th><th class="num">Importato t</th><th class="num">Venduto t</th><th class="num">Disponibile</th>
+            <th class="num">Costo €/t</th><th class="num">Ricavo</th><th class="num">Margine</th><th class="num">CBAM</th></tr>
+        ${ord.map(riga).join("")}
+      </table>
+      <p class="hint">Costi e ricavi in valuta estera convertiti al cambio ${eurF(d.cambio||1.15)}.
+        I carichi segnati "da verificare" hanno letture incoerenti nel foglio e non entrano nel totale del margine.
+        Il CBAM è calcolato sull'origine del carico con i valori predefiniti.</p>
+    </div>`;
+}
 function renderMagazzino(){
   const kmag=document.getElementById('kpi-mag');
   try{
@@ -1833,6 +1885,7 @@ function renderMagazzino(){
     const MN=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
     mkChart('chUscite','bar',us.map(x=>MN[parseInt(x.mese,10)-1]),us.map(x=>x.tonnellate),null);
   }catch(err){ if(kmag) kmag.innerHTML='<div class="pempty">Errore: '+esc(String(err))+'</div>'; }
+  renderNavi();
 }
 function renderDash(){
   if(!DATA.length) return;
