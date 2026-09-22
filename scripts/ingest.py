@@ -191,34 +191,68 @@ def analizza_documento(nome, contenuto, clienti):
         if q in grande: info["qualita"]=q; break
     return info
 
+def compatta(s):
+    """Nome azienda ridotto all'osso, per confrontare sigle e abbreviazioni."""
+    s=re.sub(r'\b(S\.?P\.?A\.?|S\.?R\.?L\.?|UNIPERSONALE|SOCIETA.?|PER AZIONI|& C\.?|SNC|SAS)\b','',str(s).upper())
+    return re.sub(r'[^A-Z0-9]','',s)
+
+def cliente_da_cartella(nome, comp):
+    """Il nome della cartella di caricamento è il miglior indizio sul cliente:
+    'SABI' -> Fonderia Sa.Bi., 'FA GROUP' -> F.A. Group. Assegna solo se univoco."""
+    n=compatta(nome)
+    if len(n)<4: return None
+    cand=[c for c,v in comp.items() if v and (v.startswith(n) or n.startswith(v) or n in v or v in n)]
+    if not cand: return None
+    if len(cand)==1: return cand[0]
+    es=[c for c in cand if comp[c]==n]
+    if len(es)==1: return es[0]
+    cand.sort(key=lambda c: abs(len(comp[c])-len(n)))
+    return cand[0] if len(comp[cand[0]])!=len(comp[cand[1]]) else None
+
+def sottocartelle(t, path):
+    r=requests.post(LIST,headers={"Authorization":"Bearer "+t,"Content-Type":"application/json"},
+        data=json.dumps({"path":path,"recursive":False}),timeout=60)
+    return [e for e in r.json().get("entries",[]) if e.get(".tag")=="folder"] if r.status_code==200 else []
+
 def indicizza_documenti(t, clienti):
-    """Processa caricamenti/offerte e caricamenti/contratti: indicizza e archivia."""
+    """Processa caricamenti/offerte e caricamenti/contratti: indicizza e archivia.
+
+    Accetta sia i file sciolti sia le cartelle per cliente (come sono organizzati
+    gli archivi storici): in quel caso il nome della cartella identifica il cliente.
+    """
     mkdir(t,CARIC_OFF); mkdir(t,CARIC_CON); mkdir(t,DOCS_DIR)
     cur=dl(t,DOCS_INDEX)
     try: indice=json.loads(cur.decode("utf-8")) if cur else {}
     except Exception: indice={}
+    comp={cod:compatta(rag) for cod,rag in clienti.items()}
     nuovi=0
     for tipo,cartella in (("offerta",CARIC_OFF),("contratto",CARIC_CON)):
-        files=listing(t,cartella)
-        if not files: continue
-        print(f"   {tipo}: {len(files)} file da archiviare")
-        for e in files:
+        # file sciolti + file dentro le cartelle per cliente
+        lavoro=[(e,"") for e in listing(t,cartella)]
+        for sc in sottocartelle(t,cartella):
+            lavoro += [(e,sc["name"]) for e in listing(t,sc["path_lower"])]
+        if not lavoro: continue
+        print(f"   {tipo}: {len(lavoro)} file da archiviare")
+        for e,sottocart in lavoro:
             nome=e["name"]
-            if nome.startswith("."): continue
-            b=dl(t,e["path_lower"])
+            if nome.startswith(".") or nome.startswith("~$"): continue
+            cod_cart=cliente_da_cartella(sottocart,comp) if sottocart else None
+            # se la cartella identifica il cliente basta il nome file: niente download inutili
+            b=None if cod_cart else dl(t,e["path_lower"])
             info=analizza_documento(nome,b or b"",clienti)
+            if cod_cart: info["cliente"]=cod_cart; info["ragione"]=clienti.get(cod_cart); info["ambiguo"]=None
             anno=(info["data"] or datetime.date.today().isoformat())[:4]
-            dest=f"{DOCS_DIR}/{tipo}/{anno}"
+            dest=f"{DOCS_DIR}/{tipo}/"+(sottocart if sottocart else anno)
             mkdir(t,f"{DOCS_DIR}/{tipo}"); mkdir(t,dest)
             r=move(t,e["path_lower"],f"{dest}/{nome}")
             if r.status_code!=200:
                 print(f"   ! archiviazione fallita: {nome} {r.status_code} {r.text[:120]}"); continue
             finale=r.json().get("metadata",{}).get("path_display",f"{dest}/{nome}")
-            key=hashlib.md5((tipo+"|"+nome+"|"+finale).encode("utf-8")).hexdigest()[:12]
+            key=hashlib.md5((tipo+"|"+nome+"|"+(sottocart or "")).encode("utf-8")).hexdigest()[:12]
             indice[key]={"id":key,"tipo":tipo,"nome":nome,"path":finale,
                          "cliente":info["cliente"],"ragione":info["ragione"],
                          "contratto":info["contratto"],"data":info["data"],
-                         "qualita":info["qualita"],"ambiguo":info.get("ambiguo"),
+                         "qualita":info["qualita"],"ambiguo":info.get("ambiguo"),"cartella":sottocart or None,
                          "archiviato":datetime.datetime.now().isoformat(timespec="seconds")}
             nuovi+=1
             print(f"     {nome} -> {finale}"

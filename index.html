@@ -274,7 +274,7 @@
       <span class="sp"></span>
       <div class="seg"><button id="vMese" class="on">Mese</button><button id="vSett">Settimana</button></div>
       <select id="calOwner"><option value="">Tutti</option><option value="__me">Solo le mie</option></select>
-      <select id="calTipo"><option value="">Tutti i tipi</option><option>chiamata</option><option>appuntamento</option><option>visita</option><option>mail</option></select>
+      <select id="calTipo"><option value="">Tutti i tipi</option><option>chiamata</option><option>appuntamento</option><option>visita</option><option>mail</option><option>offerta</option></select>
       <button id="btnNuovaAtt" class="savepill">+ Attività</button>
     </div>
     <div id="calWrap" class="calwrap"></div>
@@ -338,7 +338,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "21";
+const APP_VERSION = "22";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -1254,9 +1254,10 @@ document.getElementById('btnNuovaOff').onclick=()=>apriOff(null);
 // ================= CALENDARIO E ATTIVITÀ =================
 // Una sola entità "attività" alimenta sia il calendario sia la scheda cliente:
 // così una telefonata registrata da una parte compare subito anche nell'altra.
-const TIPI_ATT=["chiamata","appuntamento","visita","mail"];
+const TIPI_ATT=["chiamata","appuntamento","visita","mail","offerta"];
 const COLORI=["#26578a","#1f8a4c","#8a6d00","#7d3c98","#c0392b"];
 function coloreUtente(email){
+  if(!email) return "#8d99a6";   // voci di archivio, senza titolare
   const i=UTENTI.indexOf(String(email||"").toLowerCase());
   return COLORI[(i<0?UTENTI.length:i)%COLORI.length];
 }
@@ -1341,6 +1342,7 @@ function renderCal(){
   }
   document.getElementById('calLeg').innerHTML=
     UTENTI.map(u=>`<span><i style="background:${coloreUtente(u)}"></i>${esc(nomeBreve(u))}</span>`).join("")+
+    '<span><i style="background:#8d99a6"></i>offerte in archivio</span>'+
     '<span><i style="background:#fff;box-shadow:inset 0 0 0 2px #c0392b"></i>in ritardo</span>'+
     '<span style="text-decoration:line-through">conclusa</span>';
   renderDaEsitare();
