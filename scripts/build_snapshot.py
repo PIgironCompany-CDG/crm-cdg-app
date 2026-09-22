@@ -191,6 +191,136 @@ def build(xlsx_bytes: bytes) -> dict:
         "operativa": operativa,
     }
 
+# Il campo "Produttore" mescola paesi e impianti: qui si traduce nell'origine che
+# conta per il CBAM. Le sigle composite e i produttori incerti restano non attribuiti:
+# meglio dichiarare un volume "da attribuire" che stimare un obbligo sbagliato.
+ORIGINE_CBAM = {
+    "BRASILE":"BRASILE", "BRAZIL":"BRASILE",
+    "KOSAYA":"RUSSIA", "URAL STEEL":"RUSSIA", "URAL":"RUSSIA", "NLMK":"RUSSIA",
+    "RUSSIA":"RUSSIA", "TULACHERMET":"RUSSIA",
+    "ZAPORIZHSTAL":"UCRAINA", "ZAPO":"UCRAINA", "METINVEST":"UCRAINA", "UCRAINA":"UCRAINA",
+}
+
+def origine_cbam(produttore):
+    p = str(produttore or "").strip().upper()
+    if not p: return None
+    if p in ORIGINE_CBAM: return ORIGINE_CBAM[p]
+    if "/" in p: return None          # miscela di origini: non attribuibile
+    for k,v in ORIGINE_CBAM.items():
+        if k in p: return v
+    return None
+
+def costo_cbam(origine, anno, cfg):
+    """(valore predefinito x maggiorazione - benchmark x fattore) x prezzo certificato.
+    Benchmark colonna B: è quello da usare quando si dichiara con i valori predefiniti."""
+    o = (cfg.get("origini") or {}).get(origine)
+    if not o: return 0.0
+    y = str(anno)
+    magg = (cfg.get("maggiorazione") or {}).get(y)
+    fatt = (cfg.get("fattore") or {}).get(y)
+    bm = (cfg.get("benchmark") or {}).get("B")
+    if magg is None or fatt is None or bm is None: return 0.0
+    netto = max(o.get("valore_predefinito",0)*(1+magg) - bm*fatt, 0)
+    return netto * cfg.get("prezzo_certificato", 0)
+
+CBAM_FALLBACK = {
+    "prezzo_certificato": 75.28, "benchmark": {"A":1.089,"B":1.210},
+    "maggiorazione": {"2026":0.10,"2027":0.20,"2028":0.30,"2029":0.30,"2030":0.30,
+                      "2031":0.30,"2032":0.30,"2033":0.30,"2034":0.30},
+    "fattore": {"2026":0.975,"2027":0.95,"2028":0.90,"2029":0.775,"2030":0.515,
+                "2031":0.39,"2032":0.265,"2033":0.14,"2034":0},
+    "origini": {"BRASILE":{"valore_predefinito":1.478},"RUSSIA":{"valore_predefinito":3.325},
+                "UCRAINA":{"valore_predefinito":2.320},"UE":{"valore_predefinito":0}},
+}
+
+def blocco_cbam(xlsx_bytes, cfg, anno):
+    """Esposizione CBAM maturata sulle importazioni vendute nell'anno, per origine."""
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
+    ws = wb["Vendite"]
+    hdr=None; col={}
+    per = {}; non_attr = {"tonnellate":0.0,"righe":0}
+    for ri,row in enumerate(ws.iter_rows(values_only=True),1):
+        vals=[str(c).strip() if c is not None else "" for c in row]
+        if hdr is None:
+            if "Data" in vals and "Cod.Cli" in vals and "N. documento" in vals:
+                hdr=ri
+                for i,v in enumerate(vals,1):
+                    if v: col[v]=i
+            continue
+        g=lambda n: row[col[n]-1] if n in col and col[n]-1<len(row) else None
+        if str(g("Stato") or "").strip()!="Fattura": continue
+        d=g("Data")
+        if isinstance(d, datetime.datetime): d=d.date()
+        if not isinstance(d, datetime.date) or d.year!=anno: continue
+        t=(g("Quantità (kg)") or 0)/1000.0
+        if t<=0: continue
+        orig=origine_cbam(g("Produttore"))
+        if not orig:
+            non_attr["tonnellate"]+=t; non_attr["righe"]+=1; continue
+        r=per.setdefault(orig,{"tonnellate":0.0,"eur_t":costo_cbam(orig,anno,cfg),"costo":0.0})
+        r["tonnellate"]+=t
+    wb.close()
+    for orig,r in per.items():
+        r["costo"]=r["tonnellate"]*r["eur_t"]
+        r["tonnellate"]=round(r["tonnellate"],1); r["eur_t"]=round(r["eur_t"],2); r["costo"]=round(r["costo"])
+    non_attr["tonnellate"]=round(non_attr["tonnellate"],1)
+    return {"anno":anno, "per_origine":per, "non_attribuito":non_attr,
+            "totale_costo":round(sum(r["costo"] for r in per.values())),
+            "totale_tonnellate":round(sum(r["tonnellate"] for r in per.values()),1),
+            "prezzo_certificato":cfg.get("prezzo_certificato"),
+            "aggiornato":cfg.get("aggiornato")}
+
+def blocco_commerciale(xlsx_bytes, offerte, documenti, anno):
+    """Rapporto fra offerte presentate, contratti chiusi e vendite fatturate."""
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
+    ws = wb["Vendite"]
+    hdr=None; col={}
+    fatt={"n":0,"tonnellate":0.0,"valore":0.0}
+    contratti=set(); contratti_t=0.0; contratti_v=0.0
+    mesi_off={}; mesi_con={}
+    for ri,row in enumerate(ws.iter_rows(values_only=True),1):
+        vals=[str(c).strip() if c is not None else "" for c in row]
+        if hdr is None:
+            if "Data" in vals and "Cod.Cli" in vals and "N. documento" in vals:
+                hdr=ri
+                for i,v in enumerate(vals,1):
+                    if v: col[v]=i
+            continue
+        g=lambda n: row[col[n]-1] if n in col and col[n]-1<len(row) else None
+        d=g("Data")
+        if isinstance(d, datetime.datetime): d=d.date()
+        if not isinstance(d, datetime.date) or d.year!=anno: continue
+        st=str(g("Stato") or "").strip(); t=(g("Quantità (kg)") or 0)/1000.0; v=g("Importo") or 0
+        doc=str(g("N. documento") or "").strip()
+        if st=="Fattura":
+            fatt["n"]+=1; fatt["tonnellate"]+=t; fatt["valore"]+=v
+        if doc and st in ("Fattura","Ordine","Evaso") and doc not in contratti:
+            contratti.add(doc); mesi_con[f"{d.month:02d}"]=mesi_con.get(f"{d.month:02d}",0)+1
+    wb.close()
+    # offerte: quelle create nell'app più quelle archiviate come documento
+    n_off=0; val_off=0.0; ton_off=0.0
+    for o in (offerte or {}).values():
+        data=str(o.get("data") or "")
+        if data[:4]!=str(anno): continue
+        n_off+=1; mesi_off[data[5:7]]=mesi_off.get(data[5:7],0)+1
+        q=float(o.get("quantita") or 0); p=float(o.get("prezzo_vendita") or 0)
+        ton_off+=q; val_off+=q*p
+    n_doc_off=0
+    for dd in (documenti or {}).values():
+        if dd.get("tipo")!="offerta": continue
+        if str(dd.get("data") or "")[:4]!=str(anno): continue
+        n_doc_off+=1; m=str(dd.get("data"))[5:7]; mesi_off[m]=mesi_off.get(m,0)+1
+    n_doc_con=sum(1 for dd in (documenti or {}).values()
+                  if dd.get("tipo")=="contratto" and str(dd.get("data") or "")[:4]==str(anno))
+    tot_off=n_off+n_doc_off
+    return {"anno":anno,
+            "offerte":{"app":n_off,"archivio":n_doc_off,"totale":tot_off,
+                       "tonnellate":round(ton_off,1),"valore":round(val_off)},
+            "contratti":{"da_vendite":len(contratti),"documenti":n_doc_con},
+            "vendite":{"righe":fatt["n"],"tonnellate":round(fatt["tonnellate"],1),"valore":round(fatt["valore"])},
+            "conversione": round(100*len(contratti)/tot_off,1) if tot_off else None,
+            "mensili":{"offerte":mesi_off,"contratti":mesi_con}}
+
 def main():
     token = get_access_token()
     print("Token ottenuto. Scarico il database...")
@@ -210,6 +340,29 @@ def main():
           f"aggiornato={op.get('aggiornato')}")
     if not op.get('esposizione') and not op.get('giacenze'):
         print("NOTA: operativa.json assente o vuoto. Carica i file in /caricamenti; l'ingest gira alle 10:00 e 18:00.")
+    # --- CBAM e quadro commerciale ---
+    anno = datetime.date.today().year
+    def leggi(path, vuoto):
+        raw = download_opt(token, path)
+        try: return json.loads(raw) if raw else vuoto
+        except Exception: return vuoto
+    cfg = leggi("/cbam-config.json", {}) or {}
+    for k,v in CBAM_FALLBACK.items(): cfg.setdefault(k,v)
+    try:
+        snap["cbam"] = blocco_cbam(xlsx, cfg, anno)
+        c = snap["cbam"]
+        print(f"CBAM {anno}: {c['totale_tonnellate']:,.0f} t attribuite, costo stimato "
+              f"{c['totale_costo']:,} EUR | non attribuite {c['non_attribuito']['tonnellate']:,.0f} t")
+    except Exception as e:
+        print("CBAM non calcolato:", e); snap["cbam"] = {}
+    try:
+        snap["commerciale"] = blocco_commerciale(xlsx, leggi("/offerte.json",{}), leggi("/documenti.json",{}), anno)
+        k = snap["commerciale"]
+        print(f"Commerciale {anno}: offerte {k['offerte']['totale']} | contratti {k['contratti']['da_vendite']} "
+              f"| conversione {k['conversione']}%")
+    except Exception as e:
+        print("Quadro commerciale non calcolato:", e); snap["commerciale"] = {}
+
     blob = json.dumps(snap, ensure_ascii=False).encode("utf-8")
     upload(token, SNAPSHOT_PATH, blob)
     print(f"Snapshot pubblicato: {snap['n_clienti']} clienti, {len(blob)} byte.")

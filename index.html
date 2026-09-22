@@ -134,6 +134,15 @@
   .fisse.aperta{max-height:900px;margin-top:8px}
   .chk{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mid);padding-bottom:10px;white-space:nowrap}
   .chk input{width:auto}
+  /* grafico a barre essenziale per offerte/contratti */
+  .barre{width:100%;border-collapse:collapse;text-align:center}
+  .barre th{font-size:10px;color:var(--mid);font-weight:700;padding-bottom:4px}
+  .barre td{vertical-align:bottom;padding:0 2px}
+  .barre td span{display:block;font-size:10px;color:var(--mid);margin-top:2px;min-height:12px}
+  .barre .lb{text-align:left;font-size:11px;color:var(--mid);white-space:nowrap;padding-right:8px;vertical-align:middle}
+  .barre .bar{width:100%;border-radius:3px 3px 0 0;min-height:2px}
+  .barre .b1{background:var(--blue)}
+  .barre .b2{background:#1f8a4c}
   .costibox{margin-top:12px;background:var(--light);border:1px solid var(--line);border-radius:10px;padding:12px}
   .totone{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:15px;display:flex;justify-content:space-between}
   .totone b{font-size:17px}
@@ -315,6 +324,12 @@
       <p class="dsubt">Crediti clienti · merce a terra · CBAM</p>
       <div class="kpis" id="kpi-esp"></div>
       <div class="chartbox"><table class="st" id="tbl-esp"></table></div>
+      <h3 class="dh3">Offerte, contratti e vendite</h3>
+      <p class="dsubt">Quanto si propone, quanto si chiude, quanto si fattura</p>
+      <div id="box-comm"></div>
+      <h3 class="dh3">Esposizione CBAM</h3>
+      <p class="dsubt">Obbligo maturato sulle importazioni già vendute</p>
+      <div id="box-cbam"></div>
     </div>
     <div id="d-magazzino" class="dpane hidden">
       <h3 class="dh3">Magazzino e disponibilità</h3>
@@ -338,7 +353,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "22";
+const APP_VERSION = "23";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -356,6 +371,7 @@ let NOTIF = [];
 let ATT = {};
 let OFF = {};
 let DOCS = {};
+let SNAP = {};
 let CBAM = { prezzo_certificato:75.28, benchmark:{A:1.089,B:1.210},
   maggiorazione:{"2026":0.10,"2027":0.20,"2028":0.30,"2029":0.30,"2030":0.30,"2031":0.30,"2032":0.30,"2033":0.30,"2034":0.30},
   fattore:{"2026":0.975,"2027":0.95,"2028":0.90,"2029":0.775,"2030":0.515,"2031":0.39,"2032":0.265,"2033":0.14,"2034":0},
@@ -433,6 +449,7 @@ async function loadData(){
   if(r.status===401){ throw new Error("unauth"); }
   const j=await r.json();
   const snap=j.snapshot||{clienti:[]};
+  SNAP = snap;
   VEND = snap.vendite || {mensili:[],totali:{}};
   OPER = snap.operativa || {};
   INTER = j.interazioni || {};
@@ -1676,6 +1693,58 @@ function renderVendite(){
       righe.map(r=>{const b=/totale/i.test(r.voce||'')?' style="font-weight:700"':'';
         return `<tr${b}><td>${esc(r.voce)}</td><td class="num">${r.usd!=null?('$ '+num(Math.round(r.usd))):'—'}</td><td class="num">${r.eur!=null?('€ '+num(Math.round(r.eur))):'—'}</td></tr>`;}).join("");
   }catch(err){ if(kesp) kesp.innerHTML='<div class="pempty">Errore: '+esc(String(err))+'</div>'; }
+  renderCommerciale();
+  renderCbamEsposizione();
+}
+// Rapporto fra quello che si propone, quello che si chiude e quello che si fattura.
+function renderCommerciale(){
+  const box=document.getElementById('box-comm'); if(!box) return;
+  const k=(SNAP&&SNAP.commerciale)||{};
+  if(!k.offerte){ box.innerHTML='<div class="pempty">Dati non ancora disponibili: verranno calcolati al prossimo aggiornamento dello snapshot.</div>'; return; }
+  const mesi=["01","02","03","04","05","06","07","08","09","10","11","12"];
+  const off=k.mensili?k.mensili.offerte:{}, con=k.mensili?k.mensili.contratti:{};
+  const maxv=Math.max(1,...mesi.map(m=>Math.max(off[m]||0,con[m]||0)));
+  box.innerHTML=`
+    <div class="kpis">
+      ${kpi(num(k.offerte.totale),'Offerte presentate',k.offerte.archivio?`${k.offerte.app} dall'app · ${k.offerte.archivio} in archivio`:'')}
+      ${kpi(num(k.contratti.da_vendite),'Contratti',`${k.contratti.documenti} documenti archiviati`)}
+      ${kpi('€ '+num(k.vendite.valore),'Fatturato',tons(k.vendite.tonnellate))}
+      ${kpi((k.conversione!=null?k.conversione+'%':'—'),'Conversione','contratti su offerte')}
+    </div>
+    <div class="chartbox wide"><h4>Offerte e contratti per mese</h4>
+      <table class="barre"><tr><th></th>${mesi.map(m=>`<th>${m}</th>`).join("")}</tr>
+        <tr><td class="lb">offerte</td>${mesi.map(m=>`<td><div class="bar b1" style="height:${Math.round(34*(off[m]||0)/maxv)}px" title="${off[m]||0}"></div><span>${off[m]||''}</span></td>`).join("")}</tr>
+        <tr><td class="lb">contratti</td>${mesi.map(m=>`<td><div class="bar b2" style="height:${Math.round(34*(con[m]||0)/maxv)}px" title="${con[m]||0}"></div><span>${con[m]||''}</span></td>`).join("")}</tr>
+      </table>
+      <p class="hint">Offerte: documenti archiviati più quelle create nell'app. Contratti: numeri contratto distinti presenti nelle vendite.</p>
+    </div>`;
+}
+// Quanto CBAM è maturato sulle importazioni già vendute: è il conto che arriverà.
+function renderCbamEsposizione(){
+  const box=document.getElementById('box-cbam'); if(!box) return;
+  const c=(SNAP&&SNAP.cbam)||{};
+  if(!c.per_origine){ box.innerHTML='<div class="pempty">Esposizione CBAM non ancora calcolata.</div>'; return; }
+  const righe=Object.entries(c.per_origine).sort((a,b)=>b[1].costo-a[1].costo);
+  const na=c.non_attribuito||{tonnellate:0,righe:0};
+  const quota=na.tonnellate/Math.max(1,(na.tonnellate+c.totale_tonnellate))*100;
+  box.innerHTML=`
+    <div class="kpis">
+      ${kpi('€ '+num(c.totale_costo),'CBAM maturato '+c.anno,'sulle tonnellate con origine nota')}
+      ${kpi(tons(c.totale_tonnellate),'Volume tracciato','')}
+      ${kpi(tons(na.tonnellate),'Volume senza origine',na.righe+' righe da completare')}
+      ${kpi('€ '+num(c.prezzo_certificato),'Prezzo certificato','aggiornato '+(c.aggiornato||'—'))}
+    </div>
+    <div class="chartbox wide"><h4>Esposizione per origine</h4>
+      <table class="st"><tr><th>Origine</th><th class="num">Tonnellate</th><th class="num">€/t</th><th class="num">Costo CBAM</th></tr>
+      ${righe.map(([o,r])=>`<tr><td>${esc(o)}</td><td class="num">${tons(r.tonnellate)}</td>
+        <td class="num">${num(r.eur_t)}</td><td class="num">€ ${num(r.costo)}</td></tr>`).join("")}
+      <tr style="font-weight:700"><td>Totale</td><td class="num">${tons(c.totale_tonnellate)}</td><td></td><td class="num">€ ${num(c.totale_costo)}</td></tr>
+      </table>
+      ${na.tonnellate>0?`<div class="alertbar" style="margin-top:12px">
+        <b>${tons(na.tonnellate)}</b> venduti nel ${c.anno} non hanno il produttore indicato (${Math.round(quota)}% del volume):
+        su quella quota l'obbligo CBAM non è calcolabile. Compilando il campo Produttore nelle vendite il conto si completa da solo.</div>`:''}
+      <p class="hint">Calcolo con valori predefiniti e benchmark colonna B. Con dati di emissione verificati l'obbligo si riduce o si azzera.</p>
+    </div>`;
 }
 function renderMagazzino(){
   const kmag=document.getElementById('kpi-mag');
