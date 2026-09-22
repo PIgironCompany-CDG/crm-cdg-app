@@ -11,10 +11,14 @@ Crea /caricamenti se non esiste. Lo snapshot lo rigenera build_snapshot.py.
 
 Env: DROPBOX_APP_KEY, DROPBOX_REFRESH_TOKEN
 """
-import os, io, json, datetime, sys, re, zipfile, subprocess, tempfile, requests, openpyxl
+import os, io, json, datetime, sys, re, zipfile, subprocess, tempfile, hashlib, requests, openpyxl
 
 APP_KEY=os.environ["DROPBOX_APP_KEY"]; REFRESH=os.environ["DROPBOX_REFRESH_TOKEN"]
 CARIC="/caricamenti"; OPERATIVA="/operativa.json"; DBX="/crm-database.xlsx"
+# Archivio documenti commerciali: si caricano in caricamenti/offerte e caricamenti/contratti,
+# vengono indicizzati e spostati in documenti/<tipo>/<anno>/ per restare consultabili.
+CARIC_OFF=CARIC+"/offerte"; CARIC_CON=CARIC+"/contratti"
+DOCS_DIR="/documenti"; DOCS_INDEX="/documenti.json"
 CREDIT=[("Rating credito","rating",False),("Punteggio credito","punteggio",True),
         ("Limite credito report (€)","limite",True),("Proprietà","prop",False),
         ("Segnalazioni credito","segnalazioni",False),("Fatturato bilancio (€)","fatt_stim",True)]
@@ -117,6 +121,113 @@ def classify(name):
         if "MAGAZZINO" in u or "INVENDUTO" in u: return "magazzino"
         if "USCITE" in u: return "uscite"
     return "altro"
+
+# ---------- DOCUMENTI COMMERCIALI: offerte e contratti ----------
+def testo_pdf(b):
+    with tempfile.NamedTemporaryFile(suffix=".pdf",delete=False) as f: f.write(b); path=f.name
+    try: return subprocess.run(["pdftotext","-layout",path,"-"],capture_output=True,text=True).stdout
+    except Exception: return ""
+    finally:
+        try: os.unlink(path)
+        except: pass
+
+def testo_xlsx(b):
+    try:
+        wb=openpyxl.load_workbook(io.BytesIO(b),read_only=True,data_only=True)
+        out=[]
+        for ws in wb.worksheets:
+            for row in ws.iter_rows(max_row=80,values_only=True):
+                for c in row:
+                    if c is not None: out.append(str(c))
+        wb.close(); return " \n".join(out)
+    except Exception: return ""
+
+GENERICHE={"FONDERIA","FONDERIE","ACCIAIERIA","ACCIAIERIE","GHISA","GHISE","METALLI","METAL",
+           "GROUP","ITALIA","ITALIANA","INDUSTRIA","INDUSTRIALI","INDUSTRIALE","SPA","SRL","SPAA",
+           "SOCIETA","PER","AZIONI","DELLE","DELLA","COMPAGNIA","FRATELLI","FIGLI","NUOVA","OFFICINE",
+           "OFFICINA","MECCANICA","MECCANICHE","SIDERURGICA","TRADING","COMMERCIALE","SAN","SANTA"}
+def parole_chiave(ragione):
+    """Parole che identificano davvero un'azienda, senza i termini comuni del settore."""
+    t=re.sub(r'[^A-Z0-9]+',' ',str(ragione).upper())
+    return [w for w in t.split() if len(w)>=4 and w not in GENERICHE]
+
+def analizza_documento(nome, contenuto, clienti):
+    """Ricava dal documento gli estremi utili: contratto, cliente, data, importo.
+
+    clienti: {codice: ragione}. Il riconoscimento è volutamente prudente — quello che
+    non si trova resta vuoto e si completa a mano nell'app, meglio che indovinare.
+    """
+    u=nome.upper()
+    testo=""
+    if u.endswith(".PDF"): testo=testo_pdf(contenuto)
+    elif u.endswith((".XLSX",".XLSM")): testo=testo_xlsx(contenuto)
+    grande=(nome+" \n"+testo).upper()
+    info={"contratto":None,"cliente":None,"ragione":None,"data":None,"qualita":None,"importo":None,"ambiguo":None}
+    m=re.search(r'\b(\d{2}/G\d{3,4})\b', grande)
+    if m: info["contratto"]=m.group(1)
+    for cod,rag in clienti.items():
+        if cod.upper() in grande: info["cliente"]=cod; info["ragione"]=rag; break
+    if not info["cliente"]:
+        # Riconoscimento per ragione sociale. Si accetta SOLO se una sola azienda
+        # corrisponde: attribuire un'offerta al cliente sbagliato è molto peggio
+        # che lasciarla da assegnare a mano (successo già visto: Ariotti/Arizzi).
+        trovati={}
+        for cod,rag in clienti.items():
+            for parola in parole_chiave(rag):
+                if re.search(r'\b'+re.escape(parola)+r'\b', grande):
+                    trovati.setdefault(cod,(rag,parola)); break
+        if len(trovati)==1:
+            cod=list(trovati)[0]; info["cliente"]=cod; info["ragione"]=trovati[cod][0]
+        elif len(trovati)>1:
+            info["ambiguo"]=sorted(trovati.keys())
+    md=re.search(r'\b(\d{2})[./-](\d{2})[./-](\d{2,4})\b', nome)
+    if md:
+        gg,mm,aa=md.groups(); aa=("20"+aa) if len(aa)==2 else aa
+        try:
+            d=datetime.date(int(aa),int(mm),int(gg))
+            if 2015<=d.year<=2100: info["data"]=d.isoformat()
+        except Exception: pass
+    for q in ("SFEROID","EMATITE","NODULAR","AFFINAZ","ACCIAIO"):
+        if q in grande: info["qualita"]=q; break
+    return info
+
+def indicizza_documenti(t, clienti):
+    """Processa caricamenti/offerte e caricamenti/contratti: indicizza e archivia."""
+    mkdir(t,CARIC_OFF); mkdir(t,CARIC_CON); mkdir(t,DOCS_DIR)
+    cur=dl(t,DOCS_INDEX)
+    try: indice=json.loads(cur.decode("utf-8")) if cur else {}
+    except Exception: indice={}
+    nuovi=0
+    for tipo,cartella in (("offerta",CARIC_OFF),("contratto",CARIC_CON)):
+        files=listing(t,cartella)
+        if not files: continue
+        print(f"   {tipo}: {len(files)} file da archiviare")
+        for e in files:
+            nome=e["name"]
+            if nome.startswith("."): continue
+            b=dl(t,e["path_lower"])
+            info=analizza_documento(nome,b or b"",clienti)
+            anno=(info["data"] or datetime.date.today().isoformat())[:4]
+            dest=f"{DOCS_DIR}/{tipo}/{anno}"
+            mkdir(t,f"{DOCS_DIR}/{tipo}"); mkdir(t,dest)
+            r=move(t,e["path_lower"],f"{dest}/{nome}")
+            if r.status_code!=200:
+                print(f"   ! archiviazione fallita: {nome} {r.status_code} {r.text[:120]}"); continue
+            finale=r.json().get("metadata",{}).get("path_display",f"{dest}/{nome}")
+            key=hashlib.md5((tipo+"|"+nome+"|"+finale).encode("utf-8")).hexdigest()[:12]
+            indice[key]={"id":key,"tipo":tipo,"nome":nome,"path":finale,
+                         "cliente":info["cliente"],"ragione":info["ragione"],
+                         "contratto":info["contratto"],"data":info["data"],
+                         "qualita":info["qualita"],"ambiguo":info.get("ambiguo"),
+                         "archiviato":datetime.datetime.now().isoformat(timespec="seconds")}
+            nuovi+=1
+            print(f"     {nome} -> {finale}"
+                  + (f" [cliente {info['cliente']}]" if info["cliente"] else " [cliente da assegnare]")
+                  + (f" [contratto {info['contratto']}]" if info["contratto"] else ""))
+    if nuovi:
+        ul(t,DOCS_INDEX,json.dumps(indice,ensure_ascii=False).encode("utf-8"))
+        print(f"   documenti.json aggiornato: +{nuovi} (totale {len(indice)})")
+    return nuovi
 
 # ---------- BILANCI (report reportaziende.it) ----------
 def code_from_name(name):
@@ -470,11 +581,31 @@ def add_orders(xlsx_bytes,new_orders,hdr,col,last,consegne=None,residui=None,eva
         for i in infos: zw.writestr(i,parts[i.filename])
     return out.getvalue(),newlast
 
+def clienti_master(xlsx_bytes):
+    """{codice: ragione sociale} dal Master, per riconoscere i documenti."""
+    try:
+        wb=openpyxl.load_workbook(io.BytesIO(xlsx_bytes),read_only=True,data_only=True)
+        M=wb["Anagrafica_Master"]; H=[c.value for c in M[1]]
+        ic=H.index("Codice"); ir=H.index("Ragione sociale")
+        out={}
+        for r in M.iter_rows(min_row=2,values_only=True):
+            if r and r[ic]: out[str(r[ic]).strip()]=str(r[ir] or "").strip()
+        wb.close(); return out
+    except Exception as e:
+        print("   attenzione: elenco clienti non leggibile:",e); return {}
+
 def main():
     t=tok(); mkdir(t,CARIC)
+    # documenti commerciali: cartelle proprie, indipendenti dal resto dell'ingestione
+    try:
+        dbx=dl(t,DBX)
+        ndoc=indicizza_documenti(t, clienti_master(dbx) if dbx else {})
+    except Exception as e:
+        print("   attenzione: archiviazione documenti non riuscita:",e); ndoc=0
     files=listing(t,CARIC)
     if not files:
-        print("Cartella caricamenti vuota: nulla da fare."); return 0
+        print("Cartella caricamenti vuota: nulla da fare."
+              + (f" ({ndoc} documenti archiviati)" if ndoc else "")); return 0
     print(f"File in caricamenti: {len(files)}")
     cur=dl(t,OPERATIVA); op=json.loads(cur) if cur else {}
     op["aggiornato"]=datetime.date.today().isoformat(); changed=False

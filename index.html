@@ -254,6 +254,14 @@
     <div class="count" id="countO"></div>
     <div class="grid" id="gridO"></div>
     <div class="empty hidden" id="emptyO">Nessuna offerta. Premi "+ Nuova offerta" per crearne una.</div>
+    <h3 class="dh3">Documenti archiviati</h3>
+    <p class="dsubt">Offerte e contratti caricati in <b>caricamenti/offerte</b> e <b>caricamenti/contratti</b>,
+      indicizzati e archiviati alle 10:00 e alle 18:00.</p>
+    <div class="bar"><input type="search" id="qd" placeholder="Cerca documento, cliente, contratto…">
+      <select id="fTipoDoc"><option value="">Offerte e contratti</option><option value="offerta">Solo offerte</option><option value="contratto">Solo contratti</option></select>
+      <label class="chk"><input type="checkbox" id="fDaAssegnare"> solo da assegnare</label></div>
+    <div class="count" id="countD"></div>
+    <div class="pilllist" id="listD" style="padding:0 16px 60px"></div>
   </section>
 
   <section id="tab-cal" class="hidden">
@@ -330,7 +338,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "20";
+const APP_VERSION = "21";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -347,6 +355,7 @@ let FORN = {};
 let NOTIF = [];
 let ATT = {};
 let OFF = {};
+let DOCS = {};
 let CBAM = { prezzo_certificato:75.28, benchmark:{A:1.089,B:1.210},
   maggiorazione:{"2026":0.10,"2027":0.20,"2028":0.30,"2029":0.30,"2030":0.30,"2031":0.30,"2032":0.30,"2033":0.30,"2034":0.30},
   fattore:{"2026":0.975,"2027":0.95,"2028":0.90,"2029":0.775,"2030":0.515,"2031":0.39,"2032":0.265,"2033":0.14,"2034":0},
@@ -431,6 +440,7 @@ async function loadData(){
   NOTIF = j.notifiche || [];
   ATT = j.attivita || {};
   OFF = j.offerte || {};
+  DOCS = j.documenti || {};
   CBAM = j.cbam || CBAM;
   USER = (j.user||USER||"").toLowerCase();
   const byCode={}; (snap.clienti||[]).forEach(c=>{ byCode[c.codice]=Object.assign({},c); });
@@ -1144,6 +1154,61 @@ async function segnaEmessa(id){
     await ricaricaInter();
   }
 }
+// ---------- DOCUMENTI ARCHIVIATI (offerte e contratti caricati) ----------
+function docList(){ return Object.values(DOCS||{}); }
+function rigaDoc(d){
+  const cli=d.cliente?(d.ragione||d.cliente):(d.ambiguo?`da assegnare (possibili: ${d.ambiguo.join(", ")})`:"da assegnare");
+  return `<div class="pill ${d.cliente?'':'nonletta'}">
+    <div class="ptag">${esc(d.tipo)}${d.data?' · '+esc(d.data):''}${d.contratto?' · '+esc(d.contratto):''}</div>
+    <div class="ptext">${esc(d.nome)}</div>
+    <div class="pmeta">${esc(cli)}${d.qualita?' · '+esc(d.qualita):''}</div>
+    <div class="pacts"><button title="Assegna cliente" onclick="assegnaDoc('${d.id}')">✎</button></div>
+  </div>`;
+}
+function renderDocs(){
+  const box=document.getElementById('listD'); if(!box) return;
+  const q=(document.getElementById('qd').value||'').toLowerCase();
+  const tp=document.getElementById('fTipoDoc').value;
+  const soloDa=document.getElementById('fDaAssegnare').checked;
+  let l=docList().filter(d=>{
+    if(tp && d.tipo!==tp) return false;
+    if(soloDa && d.cliente) return false;
+    if(q){const b=((d.nome||"")+" "+(d.ragione||"")+" "+(d.cliente||"")+" "+(d.contratto||"")).toLowerCase(); if(!b.includes(q)) return false;}
+    return true;
+  }).sort((a,b)=>String(b.archiviato||"").localeCompare(String(a.archiviato||"")));
+  const daAss=docList().filter(d=>!d.cliente).length;
+  document.getElementById('countD').textContent=`${l.length} documenti`+(daAss?` · ${daAss} da assegnare`:"");
+  box.innerHTML=l.length?l.slice(0,60).map(rigaDoc).join(""):'<span class="pempty">Nessun documento archiviato.</span>';
+}
+function assegnaDoc(id){
+  const d=DOCS[id]; if(!d) return;
+  const cli=DATA.map(c=>({cod:c.codice,rag:c.ragione})).sort((x,y)=>String(x.rag).localeCompare(String(y.rag)));
+  const dr=document.getElementById('drawer');
+  dr.innerHTML=`<div class="dh"><button class="close" onclick="closeDrawer()">×</button>
+      <h2>Assegna documento</h2><div class="sub">${esc(d.nome)}</div></div>
+    <div class="sec">
+      <label class="fl">Cliente</label>
+      <select class="fi" id="dc_cod"><option value="">— nessuno —</option>
+        ${cli.map(c=>`<option value="${escAttr(c.cod)}"${c.cod===d.cliente?' selected':''}>${esc(c.rag)}</option>`).join("")}</select>
+      <label class="fl">Contratto collegato (facoltativo)</label>
+      <input class="fi" id="dc_contr" value="${escAttr(d.contratto||'')}" placeholder="es. 26/G0131">
+      <div class="pmeta" style="margin-top:10px">Tipo: ${esc(d.tipo)} · archiviato in ${esc(d.path||'')}</div>
+    </div>
+    <div class="savebar"><button id="dcBtn">Salva</button><span id="dcMsg"></span></div>`;
+  document.getElementById('dcBtn').onclick=async()=>{
+    const cod=document.getElementById('dc_cod').value;
+    const rag=(DATA.find(c=>c.codice===cod)||{}).ragione||"";
+    const btn=document.getElementById('dcBtn'), msg=document.getElementById('dcMsg');
+    btn.disabled=true; btn.textContent="Salvataggio…";
+    const {ok,j}=await apiPost('/documento-assegna',{id,codice:cod,ragione:rag,
+      contratto:document.getElementById('dc_contr').value});
+    if(ok&&j.documento){ DOCS[id]=j.documento; msg.textContent="Salvato ✓"; renderDocs(); setTimeout(closeDrawer,700); }
+    else { msg.textContent=(j&&j.error)||"Errore."; btn.disabled=false; btn.textContent="Salva"; }
+  };
+  dr.classList.add('open'); document.getElementById('ov').classList.add('open');
+}
+['qd','fTipoDoc','fDaAssegnare'].forEach(i=>{const e=document.getElementById(i); if(e) e.addEventListener('input',renderDocs);});
+
 // blocco offerte dentro la scheda cliente
 function bloccoOfferte(cod){
   const l=offList().filter(o=>o.codice===cod)
@@ -1163,7 +1228,20 @@ function bloccoOfferte(cod){
   };
   return `<div class="sec"><h3>Offerte
       <button type="button" class="addbtn" onclick="nuovaOffCliente('${esc(cod)}')">+ Nuova offerta</button></h3>
-    ${l.length?l.slice(0,6).map(riga).join(""):'<span class="pempty">Nessuna offerta per questo cliente.</span>'}</div>`;
+    ${l.length?l.slice(0,6).map(riga).join(""):'<span class="pempty">Nessuna offerta per questo cliente.</span>'}
+    ${docCliente(cod)}</div>`;
+}
+// documenti archiviati riferiti a questo cliente, dentro la scheda
+function docCliente(cod){
+  const l=docList().filter(d=>d.cliente===cod)
+    .sort((a,b)=>String(b.data||b.archiviato||"").localeCompare(String(a.data||a.archiviato||"")));
+  if(!l.length) return "";
+  return `<div class="pcat">Documenti archiviati</div>`+
+    l.slice(0,6).map(d=>`<div class="attrow">
+      <div class="when">${esc(d.data||"")}<br><span class="badge2">${esc(d.tipo)}</span></div>
+      <div style="flex:1">${esc(d.nome)}
+        <div class="pmeta">${d.contratto?'contratto '+esc(d.contratto):''}${d.qualita?' · '+esc(d.qualita):''}</div></div>
+    </div>`).join("");
 }
 function nuovaOffCliente(cod){
   closeDrawer();
@@ -1500,7 +1578,7 @@ document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
   if(b.dataset.tab==='fornitori') renderForn();
   if(b.dataset.tab==='inbox') renderInbox();
   if(b.dataset.tab==='cal') renderCal();
-  if(b.dataset.tab==='off') renderOff();
+  if(b.dataset.tab==='off'){ renderOff(); renderDocs(); }
 });
 // sotto-tab dashboard
 document.querySelectorAll('.dsub button').forEach(b=>b.onclick=()=>{
@@ -1663,6 +1741,7 @@ async function start(){
   popolaOwnerCal();
   renderCal();
   renderOff();
+  renderDocs();
 }
 
 // avvio: se ho un token valido, entro; altrimenti login
