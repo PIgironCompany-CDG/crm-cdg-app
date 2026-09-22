@@ -231,6 +231,7 @@
     <button data-tab="cal">Calendario <span id="badgeCal" class="badge hidden">0</span></button>
     <button data-tab="inbox">Inbox <span id="badge" class="badge hidden">0</span></button>
     <button data-tab="dash">Dashboard</button>
+    <button data-tab="cbam">CBAM</button>
   </nav>
 
   <section id="tab-clienti">
@@ -254,6 +255,15 @@
     <div class="count" id="countF"></div>
     <div class="grid" id="gridF"></div>
     <div class="empty hidden" id="emptyF">Nessun fornitore. Premi "+ Nuovo fornitore" per aggiungerne uno.</div>
+  </section>
+
+  <section id="tab-cbam" class="hidden">
+    <div class="dsub">
+      <button class="on" data-c="calc">Calcolatore</button>
+      <button data-c="dich">Dichiarazione</button>
+    </div>
+    <div id="c-calc" class="dpane"></div>
+    <div id="c-dich" class="dpane hidden"></div>
   </section>
 
   <section id="tab-off" class="hidden">
@@ -356,7 +366,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "25";
+const APP_VERSION = "26";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -375,6 +385,7 @@ let ATT = {};
 let OFF = {};
 let DOCS = {};
 let SNAP = {};
+let CBAMIMP = {};
 let CBAM = { prezzo_certificato:75.28, benchmark:{A:1.089,B:1.210},
   maggiorazione:{"2026":0.10,"2027":0.20,"2028":0.30,"2029":0.30,"2030":0.30,"2031":0.30,"2032":0.30,"2033":0.30,"2034":0.30},
   fattore:{"2026":0.975,"2027":0.95,"2028":0.90,"2029":0.775,"2030":0.515,"2031":0.39,"2032":0.265,"2033":0.14,"2034":0},
@@ -462,6 +473,7 @@ async function loadData(){
   OFF = j.offerte || {};
   DOCS = j.documenti || {};
   CBAM = j.cbam || CBAM;
+  CBAMIMP = j.cbamImpianti || CBAMIMP;
   USER = (j.user||USER||"").toLowerCase();
   const byCode={}; (snap.clienti||[]).forEach(c=>{ byCode[c.codice]=Object.assign({},c); });
   // nuovi clienti creati dall'app e non ancora nel database
@@ -758,6 +770,187 @@ async function addInter(tp){
   }
   else alert('Errore nel salvataggio.');
 }
+
+// ================= CBAM =================
+// Due pagine: il calcolatore risponde a "quanto costa una tonnellata da quell'origine",
+// la dichiarazione risponde a "quanto ci costerà l'anno, e quanto si risparmia
+// passando dai valori predefiniti ai dati di emissione verificati".
+function renderCbamCalc(){
+  const box=document.getElementById('c-calc'); if(!box) return;
+  const C=CBAM||{}; const origini=Object.keys(C.origini||{});
+  const anno=new Date().getFullYear();
+  box.innerHTML=`
+    <div class="chartbox wide"><h4>Calcolatore costo CBAM</h4>
+      <div class="cgrid2">
+        <div><label class="fl">Origine</label><select class="fi" id="cb_orig">
+          ${origini.map(o=>`<option${o==='BRASILE'?' selected':''}>${esc(o)}</option>`).join("")}</select></div>
+        <div><label class="fl">Anno</label><select class="fi" id="cb_anno">
+          ${Object.keys(C.fattore||{}).filter(y=>/^\\d{4}$/.test(y)).map(y=>`<option${y==String(anno)?' selected':''}>${y}</option>`).join("")}</select></div>
+        <div><label class="fl">Tonnellate</label><input class="fi" id="cb_ton" type="number" value="1000"></div>
+        <div><label class="fl">Prezzo certificato (€)</label><input class="fi" id="cb_prezzo" type="number" step="0.01" value="${C.prezzo_certificato||75.28}"></div>
+      </div>
+      <label class="chk" style="margin-top:8px"><input type="checkbox" id="cb_ver"> uso dati di emissione verificati (benchmark colonna A)</label>
+      <div id="cb_out"></div>
+    </div>
+    <div class="chartbox wide"><h4>Come evolve nei prossimi anni</h4>
+      <div id="cb_proi"></div>
+      <p class="hint">A parità di prezzo del certificato. Il costo cresce perché la maggiorazione sale e il fattore CBAM scende.</p>
+    </div>`;
+  ['cb_orig','cb_anno','cb_ton','cb_prezzo','cb_ver'].forEach(i=>{
+    const e=document.getElementById(i); if(e) e.addEventListener('input',calcolaCbamPagina);
+    if(e) e.addEventListener('change',calcolaCbamPagina);
+  });
+  calcolaCbamPagina();
+}
+// Due metodi diversi, non due varianti dello stesso calcolo:
+// - valori predefiniti: emissioni di riferimento MAGGIORATE, detrazione col benchmark B;
+// - dati verificati: emissioni reali dell'impianto SENZA maggiorazione, detrazione col benchmark A.
+// È qui che sta il vantaggio della verifica: sparisce la maggiorazione e si parte dal dato vero.
+function cbamDettaglio(origine,anno,verificati,prezzo){
+  const C=CBAM||{}; const o=(C.origini||{})[origine];
+  if(!o) return null;
+  const y=String(anno);
+  const magg=(C.maggiorazione||{})[y], fatt=(C.fattore||{})[y];
+  if(magg==null||fatt==null) return null;
+  let base, maggApplicata, bm;
+  if(verificati){
+    base=(o.emissioni_verificate!=null?o.emissioni_verificate:o.emissioni_verificate_ipotesi);
+    if(base==null) return null;                 // nessun dato verificato: non si può stimare
+    maggApplicata=0; bm=(C.benchmark||{}).A;
+  }else{
+    base=o.valore_predefinito; maggApplicata=magg; bm=(C.benchmark||{}).B;
+  }
+  if(bm==null) return null;
+  const emiss=base*(1+maggApplicata);
+  const detr=bm*fatt;
+  const netto=Math.max(emiss-detr,0);
+  return {base,magg:maggApplicata,fatt,bm,emiss,detr,netto,eur_t:netto*prezzo,
+          ipotesi:verificati&&o.emissioni_verificate==null};
+}
+function calcolaCbamPagina(){
+  const g=i=>{const e=document.getElementById(i); return e?e.value:"";};
+  const orig=g('cb_orig'), anno=parseInt(g('cb_anno'),10);
+  const ton=valNum(g('cb_ton')), prezzo=valNum(g('cb_prezzo'));
+  const ver=document.getElementById('cb_ver').checked;
+  const d=cbamDettaglio(orig,anno,ver,prezzo);
+  const out=document.getElementById('cb_out');
+  if(!d){ out.innerHTML='<div class="pempty">Parametri non disponibili per questa combinazione.</div>'; return; }
+  const dPre=cbamDettaglio(orig,anno,false,prezzo);
+  const dVer=cbamDettaglio(orig,anno,true,prezzo);
+  const risp=(dPre&&dVer)?(dPre.eur_t-dVer.eur_t)*ton:0;
+  out.innerHTML=`
+    <div class="costibox">
+      <div class="kv">
+        <div class="k">Emissioni incorporate</div><div>${eurF(d.base,3)} tCO2e/t ${ver?'(verificate)':'(valore predefinito)'}</div>
+        <div class="k">Maggiorazione ${anno}</div><div>+${Math.round(d.magg*100)}% → ${eurF(d.emiss,3)} tCO2e/t</div>
+        <div class="k">Benchmark colonna ${ver?'A':'B'}</div><div>${eurF(d.bm,3)} × fattore ${Math.round(d.fatt*1000)/10}% = ${eurF(d.detr,3)}</div>
+        <div class="k">Emissioni nette</div><div><b>${eurF(d.netto,3)} tCO2e/t</b></div>
+      </div>
+      <div class="totone">Costo CBAM <b>${eurF(d.eur_t)} €/t</b></div>
+      <div class="totone" style="border:0;padding-top:4px">Su ${eurF(ton,0)} t <b>€ ${num(Math.round(d.eur_t*ton))}</b></div>
+      ${(risp>0&&!ver)?`<div class="alertbar" style="margin-top:10px">Con dati di emissione verificati il costo scenderebbe a
+        ${eurF(dVer.eur_t)} €/t: <b>€ ${num(Math.round(risp))}</b> di risparmio su ${eurF(ton,0)} t.</div>`:''}
+    </div>`;
+  // proiezione pluriennale
+  const anni=Object.keys((CBAM||{}).fattore||{}).filter(y=>/^\d{4}$/.test(y)).sort();
+  const righe=anni.map(y=>{
+    const a=cbamDettaglio(orig,parseInt(y,10),false,prezzo);
+    const b=cbamDettaglio(orig,parseInt(y,10),true,prezzo);
+    return {y, pre:a?a.eur_t:0, ver:b?b.eur_t:null};
+  });
+  const max=Math.max(1,...righe.map(r=>r.pre));
+  document.getElementById('cb_proi').innerHTML=`
+    <table class="st"><tr><th>Anno</th><th class="num">Valori predefiniti</th><th class="num">Dati verificati</th>
+      <th class="num">Differenza su ${eurF(ton,0)} t</th><th></th></tr>
+    ${righe.map(r=>`<tr><td>${r.y}</td><td class="num">${eurF(r.pre)} €/t</td>
+      <td class="num">${r.ver!=null?eurF(r.ver)+' €/t':'<span class="pempty">n.d.</span>'}</td>
+      <td class="num">${r.ver!=null?'<b>€ '+num(Math.round((r.pre-r.ver)*ton))+'</b>':'—'}</td>
+      <td style="width:38%"><div class="bar b1" style="height:9px;width:${Math.round(100*r.pre/max)}%;border-radius:4px"></div></td></tr>`).join("")}
+    </table>`;
+}
+function renderCbamDich(){
+  const box=document.getElementById('c-dich'); if(!box) return;
+  const C=CBAM||{}; const DB=CBAMIMP||{};
+  const anno=new Date().getFullYear();
+  const esp=(SNAP&&SNAP.cbam)||{};
+  const navi=(OPER&&OPER.navi)||{};
+  const prezzo=C.prezzo_certificato||75.28;
+  // volumi: importato dai carichi, venduto dalle fatture
+  const perOrig={};
+  ((navi.navi)||[]).forEach(n=>{ if(!n.origine) return;
+    perOrig[n.origine]=(perOrig[n.origine]||0)+(n.totale||0); });
+  const righe=Object.entries(perOrig).map(([o,t])=>{
+    const p=cbamDettaglio(o,anno,false,prezzo), v=cbamDettaglio(o,anno,true,prezzo);
+    return {origine:o,ton:t,pre:p?p.eur_t*t:0,ver:v?v.eur_t*t:null,ipotesi:v?v.ipotesi:false};
+  }).sort((a,b)=>b.pre-a.pre);
+  const totPre=righe.reduce((s,r)=>s+r.pre,0), totVer=righe.reduce((s,r)=>s+(r.ver||0),0);
+  const imp=DB.impianti||{};
+  const rf=C.regole_finanziarie||{};
+  const scad=(C.scadenze||[]);
+  box.innerHTML=`
+    <div class="kpis">
+      ${kpi('€ '+num(Math.round(totPre)),'Costo con valori predefiniti',anno+' · sulle tonnellate importate')}
+      ${kpi('€ '+num(Math.round(totVer)),'Costo con dati verificati','se le verifiche sono completate')}
+      ${kpi('€ '+num(Math.round(totPre-totVer)),'Risparmio possibile','differenza fra i due metodi')}
+      ${kpi(eurF(prezzo)+' €','Prezzo certificato','aggiornato '+(C.aggiornato||'—'))}
+    </div>
+    <div class="chartbox wide"><h4>Simulazione costo di importazione ${anno}</h4>
+      <table class="st"><tr><th>Origine</th><th class="num">Tonnellate</th>
+        <th class="num">Valori predefiniti</th><th class="num">Dati verificati</th><th class="num">Differenza</th></tr>
+        ${righe.map(r=>`<tr><td>${esc(r.origine)}</td><td class="num">${tons(r.ton)}</td>
+          <td class="num">€ ${num(Math.round(r.pre))}</td>
+          <td class="num">${r.ver!=null?'€ '+num(Math.round(r.ver))+(r.ipotesi?' <span class="pempty">(ipotesi)</span>':''):'<span class="pempty">n.d.</span>'}</td>
+          <td class="num">${r.ver!=null?'<b>€ '+num(Math.round(r.pre-r.ver))+'</b>':'—'}</td></tr>`).join("")}
+        <tr style="font-weight:700"><td>Totale</td><td class="num">${tons(righe.reduce((s,r)=>s+r.ton,0))}</td>
+          <td class="num">€ ${num(Math.round(totPre))}</td><td class="num">€ ${num(Math.round(totVer))}</td>
+          <td class="num">€ ${num(Math.round(totPre-totVer))}</td></tr>
+      </table>
+      <p class="hint">Volumi dai carichi registrati nel magazzino. ${esp.non_attribuito&&esp.non_attribuito.tonnellate?
+        `Nelle vendite restano ${tons(esp.non_attribuito.tonnellate)} senza origine indicata: non entrano in questo conto.`:''}</p>
+    </div>
+    <div class="chartbox wide"><h4>Impianti e stato delle verifiche</h4>
+      <table class="st"><tr><th>Impianto</th><th>Sito</th><th>Stato</th><th>Verificatore</th><th>Dati effettivi</th></tr>
+        ${Object.values(imp).map(i=>`<tr>
+          <td><b>${esc(i.nome)}</b><div class="pmeta">${esc(i.paese||'')}</div></td>
+          <td>${esc(i.sito||'—')}</td>
+          <td>${esc(i.stato||'—')}${i.data_verifica?`<div class="pmeta">${esc(i.data_verifica)}</div>`:''}</td>
+          <td>${esc(i.verificatore||'—')}</td>
+          <td>${i.dati_effettivi_disponibili?'<b style="color:#1f8a4c">sì</b>':'<span style="color:#c0392b">no</span>'}
+              ${i.piano_monitoraggio?`<div class="pmeta">piano: ${esc(i.piano_monitoraggio.stato||'—')}</div>`:''}</td>
+        </tr>${i.note?`<tr><td colspan="5" class="pmeta" style="padding-top:0">↳ ${esc(i.note)}</td></tr>`:''}`).join("")}
+      </table>
+      ${DB.consulente?`<p class="hint">Supporto tecnico: ${esc(DB.consulente.nome)} — ${esc(DB.consulente.societa)}.</p>`:''}
+    </div>
+    <div class="chartbox wide"><h4>Prospetto finanziario</h4>
+      <div class="kv">
+        <div class="k">Volume di riferimento</div><div>${tons(rf.volume_annuo_riferimento_t||0)} l'anno</div>
+        <div class="k">Anticipo certificati</div><div>${rf.anticipo_percentuale!=null?Math.round(rf.anticipo_percentuale*100)+'% delle emissioni incorporate':'—'}</div>
+      </div>
+      <table class="st" style="margin-top:10px">
+        <tr><th>Anno</th><th class="num">Costo predefiniti</th><th class="num">Costo verificati</th><th class="num">Anticipo da coprire</th></tr>
+        ${Object.keys(C.fattore||{}).filter(y=>/^\d{4}$/.test(y)).sort().map(y=>{
+          const t=rf.volume_annuo_riferimento_t||0;
+          const a=cbamDettaglio('BRASILE',parseInt(y,10),false,prezzo);
+          const b=cbamDettaglio('BRASILE',parseInt(y,10),true,prezzo);
+          const cp=a?a.eur_t*t:0, cv=b?b.eur_t*t:null;
+          return `<tr><td>${y}</td><td class="num">€ ${num(Math.round(cp))}</td>
+            <td class="num">${cv!=null?'€ '+num(Math.round(cv)):'<span class="pempty">n.d.</span>'}</td>
+            <td class="num">€ ${num(Math.round(cp*(rf.anticipo_percentuale||0)))}</td></tr>`;
+        }).join("")}
+      </table>
+      <p class="hint">Proiezione su ${tons(rf.volume_annuo_riferimento_t||0)} di origine brasiliana, a prezzo del certificato costante.
+        La percentuale di anticipo va confermata sulla normativa vigente prima di usarla per impegni finanziari.</p>
+    </div>
+    ${scad.length?`<div class="chartbox wide"><h4>Scadenze</h4>
+      <table class="st">${scad.map(s=>`<tr><td style="width:120px"><b>${esc(s.data)}</b></td><td>${esc(s.descrizione)}</td></tr>`).join("")}</table>
+    </div>`:''}`;
+}
+function renderCbam(){ renderCbamCalc(); renderCbamDich(); }
+document.querySelectorAll('#tab-cbam .dsub button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#tab-cbam .dsub button').forEach(x=>x.classList.toggle('on',x===b));
+  document.getElementById('c-calc').classList.toggle('hidden', b.dataset.c!=='calc');
+  document.getElementById('c-dich').classList.toggle('hidden', b.dataset.c!=='dich');
+});
 
 // ================= OFFERTE =================
 // Il conteggio riproduce il foglio "Conteggio PREZZI.xlsx" voce per voce: chi lo compila
@@ -1655,6 +1848,7 @@ document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
   document.getElementById('tab-clienti').classList.toggle('hidden', b.dataset.tab!=='clienti');
   document.getElementById('tab-fornitori').classList.toggle('hidden', b.dataset.tab!=='fornitori');
   document.getElementById('tab-off').classList.toggle('hidden', b.dataset.tab!=='off');
+  document.getElementById('tab-cbam').classList.toggle('hidden', b.dataset.tab!=='cbam');
   document.getElementById('tab-cal').classList.toggle('hidden', b.dataset.tab!=='cal');
   document.getElementById('tab-inbox').classList.toggle('hidden', b.dataset.tab!=='inbox');
   document.getElementById('tab-dash').classList.toggle('hidden', b.dataset.tab!=='dash');
@@ -1663,6 +1857,7 @@ document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
   if(b.dataset.tab==='inbox') renderInbox();
   if(b.dataset.tab==='cal') renderCal();
   if(b.dataset.tab==='off'){ renderOff(); renderDocs(); }
+  if(b.dataset.tab==='cbam') renderCbam();
 });
 // sotto-tab dashboard
 document.querySelectorAll('.dsub button').forEach(b=>b.onclick=()=>{
