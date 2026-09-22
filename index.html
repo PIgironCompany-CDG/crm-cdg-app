@@ -353,7 +353,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "23";
+const APP_VERSION = "24";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -1175,12 +1175,64 @@ async function segnaEmessa(id){
 function docList(){ return Object.values(DOCS||{}); }
 function rigaDoc(d){
   const cli=d.cliente?(d.ragione||d.cliente):(d.ambiguo?`da assegnare (possibili: ${d.ambiguo.join(", ")})`:"da assegnare");
-  return `<div class="pill ${d.cliente?'':'nonletta'}">
+  const prezzo=(d.prezzo!=null)?`<b>${eurF(d.prezzo)} €/t</b>`:"";
+  const marg=(d.margine!=null)?` · margine <b style="color:${d.margine>0?'#1f8a4c':'#c0392b'}">${eurF(d.margine)} €/t</b>${d.margine_pc!=null?` (${eurF(d.margine_pc)}%)`:""}`:"";
+  return `<div class="pill ${d.cliente?'':'nonletta'}" style="cursor:pointer" onclick="apriDoc('${d.id}')">
     <div class="ptag">${esc(d.tipo)}${d.data?' · '+esc(d.data):''}${d.contratto?' · '+esc(d.contratto):''}</div>
     <div class="ptext">${esc(d.nome)}</div>
     <div class="pmeta">${esc(cli)}${d.qualita?' · '+esc(d.qualita):''}</div>
-    <div class="pacts"><button title="Assegna cliente" onclick="assegnaDoc('${d.id}')">✎</button></div>
+    ${prezzo?`<div class="pmeta">${prezzo}${marg}</div>`:''}
+    <div class="pacts"><button title="Assegna cliente" onclick="event.stopPropagation();assegnaDoc('${d.id}')">✎</button></div>
   </div>`;
+}
+// Riepilogo di un'offerta archiviata, letto dal foglio di conteggio originale:
+// si consulta come se fosse stata creata nell'app.
+function apriDoc(id){
+  const d=DOCS[id]; if(!d) return;
+  const c=d.conteggio;
+  const dr=document.getElementById('drawer');
+  const voci=(c&&c.voci)||[];
+  dr.innerHTML=`<div class="dh"><button class="close" onclick="closeDrawer()">×</button>
+      <h2>${esc(d.ragione||d.cartella||d.nome)}</h2>
+      <div class="sub">${esc(d.tipo)}${d.data?' del '+esc(d.data):''}${d.contratto?' · contratto '+esc(d.contratto):''}</div></div>
+    ${voci.length?`<div class="sec"><h3>Conteggio dell'offerta</h3>
+      ${c.testata?`<div class="pmeta" style="margin-bottom:8px">${esc(c.testata)}</div>`:''}
+      <table class="st">
+        <tr><th>Materiale</th><th class="num">Costo CIF €</th><th class="num">Prezzo</th><th class="num">Margine</th><th class="num">%</th></tr>
+        ${voci.map(v=>`<tr>
+          <td>${esc(v.qualita||'—')}</td>
+          <td class="num">${v.costo_cif_eur!=null?eurF(v.costo_cif_eur):'—'}</td>
+          <td class="num"><b>${eurF(v.prezzo)}</b></td>
+          <td class="num" style="color:${(v.margine||0)>0?'#1f8a4c':'#c0392b'}">${v.margine!=null?eurF(v.margine):'—'}</td>
+          <td class="num">${v.margine_pc!=null?eurF(v.margine_pc)+'%':'—'}</td></tr>`).join("")}
+      </table>
+      <p class="hint">Valori letti dal foglio di conteggio archiviato.</p>
+    </div>`:`<div class="sec"><span class="pempty">Nessun conteggio leggibile in questo documento.</span></div>`}
+    <div class="sec"><h3>Documento</h3>
+      <div class="kv">
+        <div class="k">File</div><div>${esc(d.nome)}</div>
+        <div class="k">Cliente</div><div>${esc(d.ragione||d.cliente||'da assegnare')}</div>
+        <div class="k">Archiviato in</div><div style="word-break:break-all">${esc(d.path||'—')}</div>
+      </div>
+    </div>
+    <div class="savebar">
+      <button onclick="assegnaDoc('${d.id}')">Assegna cliente</button>
+      ${d.cliente?`<button class="cancelpill" onclick="nuovaOffDaArchivio('${d.id}')">Crea offerta da questi valori</button>`:''}
+    </div>`;
+  dr.classList.add('open'); document.getElementById('ov').classList.add('open');
+}
+// riparte da un'offerta archiviata per farne una nuova nel CRM
+function nuovaOffDaArchivio(id){
+  const d=DOCS[id]; if(!d) return;
+  const v=((d.conteggio||{}).voci||[])[0]||{};
+  closeDrawer();
+  setTimeout(()=>{
+    apriOff(null);
+    const set=(k,val)=>{const e=document.getElementById('of_'+k); if(e&&val!=null) e.value=val;};
+    set('codice',d.cliente); set('prezzo_vendita',v.prezzo);
+    if(v.costo_cif_eur){ set('cambio',1); set('costo_cif',v.costo_cif_eur); }
+    applicaResa(); aggiornaRiepilogo();
+  },220);
 }
 function renderDocs(){
   const box=document.getElementById('listD'); if(!box) return;
@@ -1253,11 +1305,21 @@ function docCliente(cod){
   const l=docList().filter(d=>d.cliente===cod)
     .sort((a,b)=>String(b.data||b.archiviato||"").localeCompare(String(a.data||a.archiviato||"")));
   if(!l.length) return "";
-  return `<div class="pcat">Documenti archiviati</div>`+
-    l.slice(0,6).map(d=>`<div class="attrow">
+  // l'ultima offerta con un prezzo: è la prima cosa che serve sapere prima di riquotare
+  const ult=l.find(d=>d.tipo==="offerta" && d.prezzo!=null);
+  const testa=ult?`<div class="costibox" style="margin:0 0 10px">
+      <div class="totone" style="border:0;padding:0;margin:0">Ultima offerta ${esc(ult.data||"")}
+        <b>${eurF(ult.prezzo)} €/t</b></div>
+      <div class="pmeta">${ult.qualita?esc(ult.qualita)+' · ':''}margine
+        <b style="color:${(ult.margine||0)>0?'#1f8a4c':'#c0392b'}">${ult.margine!=null?eurF(ult.margine)+' €/t':'—'}</b>
+        ${ult.margine_pc!=null?' ('+eurF(ult.margine_pc)+'%)':''}
+        · <span class="plink" onclick="apriDoc('${ult.id}')">riepilogo</span></div>
+    </div>`:"";
+  return `<div class="pcat">Documenti archiviati</div>`+testa+
+    l.slice(0,6).map(d=>`<div class="attrow" style="cursor:pointer" onclick="apriDoc('${d.id}')">
       <div class="when">${esc(d.data||"")}<br><span class="badge2">${esc(d.tipo)}</span></div>
       <div style="flex:1">${esc(d.nome)}
-        <div class="pmeta">${d.contratto?'contratto '+esc(d.contratto):''}${d.qualita?' · '+esc(d.qualita):''}</div></div>
+        <div class="pmeta">${d.prezzo!=null?eurF(d.prezzo)+' €/t':''}${d.margine!=null?' · margine '+eurF(d.margine):''}${d.contratto?' · contratto '+esc(d.contratto):''}</div></div>
     </div>`).join("");
 }
 function nuovaOffCliente(cod){

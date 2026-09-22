@@ -225,8 +225,17 @@ def indicizza_documenti(t, clienti):
     try: indice=json.loads(cur.decode("utf-8")) if cur else {}
     except Exception: indice={}
     comp={cod:compatta(rag) for cod,rag in clienti.items()}
+    # Le cartelle di caricamento si riconoscono dal nome, non da un percorso fisso:
+    # vanno bene "offerte", "OFFERTE", "CLIENTI E CONTEGGIO PREZZO", "CONTRATTI"...
+    sorgenti=[("offerta",CARIC_OFF),("contratto",CARIC_CON)]
+    visti={CARIC_OFF.lower(),CARIC_CON.lower()}
+    for sc in sottocartelle(t,CARIC):
+        nome=sc["name"].upper(); p=sc["path_lower"]
+        if p in visti or nome=="ARCHIVIO": continue
+        if "OFFERT" in nome or "CONTEGGIO" in nome or "PREZZ" in nome: sorgenti.append(("offerta",p)); visti.add(p)
+        elif "CONTRATT" in nome: sorgenti.append(("contratto",p)); visti.add(p)
     nuovi=0
-    for tipo,cartella in (("offerta",CARIC_OFF),("contratto",CARIC_CON)):
+    for tipo,cartella in sorgenti:
         # file sciolti + file dentro le cartelle per cliente
         lavoro=[(e,"") for e in listing(t,cartella)]
         for sc in sottocartelle(t,cartella):
