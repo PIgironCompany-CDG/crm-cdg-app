@@ -321,6 +321,95 @@ def blocco_commerciale(xlsx_bytes, offerte, documenti, anno):
             "conversione": round(100*len(contratti)/tot_off,1) if tot_off else None,
             "mensili":{"offerte":mesi_off,"contratti":mesi_con}}
 
+# Quanto resta "caldo" un cliente dopo un'offerta, e quando si considera raffreddato.
+GIORNI_CALDO = 14
+GIORNI_RAFFREDDAMENTO = 45
+
+def stato_commerciale(xlsx_bytes, offerte, documenti, oggi=None):
+    """Per ogni cliente: contratti aperti, ultima offerta e stato che ne consegue.
+
+    La regola commerciale è semplice e la si applica una volta sola, qui:
+    - chi ha un contratto aperto è servito, non va ricontattato;
+    - chi ha ricevuto un'offerta da meno di due settimane è caldo;
+    - poi entra in raffreddamento, e oltre le sei settimane torna da lavorare.
+    """
+    oggi = oggi or datetime.date.today()
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
+    ws = wb["Vendite"]
+    hdr=None; col={}
+    contratti={}      # codice -> {aperti, tonnellate, valore, elenco}
+    ultima_vendita={}
+    for ri,row in enumerate(ws.iter_rows(values_only=True),1):
+        vals=[str(c).strip() if c is not None else "" for c in row]
+        if hdr is None:
+            if "Data" in vals and "Cod.Cli" in vals and "N. documento" in vals:
+                hdr=ri
+                for i,v in enumerate(vals,1):
+                    if v: col[v]=i
+            continue
+        g=lambda n: row[col[n]-1] if n in col and col[n]-1<len(row) else None
+        cod=str(g("Cod.Cli") or "").strip()
+        if not cod: continue
+        st=str(g("Stato") or "").strip()
+        d=g("Data")
+        if isinstance(d, datetime.datetime): d=d.date()
+        if st=="Fattura" and isinstance(d, datetime.date):
+            if cod not in ultima_vendita or d>ultima_vendita[cod]: ultima_vendita[cod]=d
+        if st=="Ordine":
+            t=(g("Quantità (kg)") or 0)/1000.0
+            if t<=0: continue
+            c=contratti.setdefault(cod,{"aperti":0,"tonnellate":0.0,"valore":0.0,"elenco":[]})
+            c["aperti"]+=1; c["tonnellate"]+=t; c["valore"]+=(g("Importo") or 0)
+            c["elenco"].append({"documento":str(g("N. documento") or ""),
+                                "tonnellate":round(t,1),
+                                "data":d.isoformat() if isinstance(d,datetime.date) else None})
+    wb.close()
+
+    # ultima offerta per cliente: quelle create nell'app e quelle archiviate
+    ult_off={}
+    def considera(cod, data, prezzo, margine, rif):
+        if not cod or not data: return
+        try: dd=datetime.date.fromisoformat(str(data)[:10])
+        except Exception: return
+        cur=ult_off.get(cod)
+        if not cur or dd>cur["data"]:
+            ult_off[cod]={"data":dd,"prezzo":prezzo,"margine":margine,"rif":rif}
+    for o in (offerte or {}).values():
+        considera(o.get("codice"), o.get("data"), o.get("prezzo_vendita"), o.get("margine"), o.get("numero"))
+    for d in (documenti or {}).values():
+        if d.get("tipo")=="offerta":
+            considera(d.get("cliente"), d.get("data"), d.get("prezzo"), d.get("margine"), d.get("nome"))
+
+    out={}
+    codici=set(contratti)|set(ult_off)|set(ultima_vendita)
+    for cod in codici:
+        c=contratti.get(cod); o=ult_off.get(cod)
+        gg=(oggi-o["data"]).days if o else None
+        if c and c["aperti"]>0:
+            stato="Contratto attivo"; motivo=f"{c['aperti']} contratti aperti per {round(c['tonnellate'],1)} t"
+        elif gg is not None and gg<=GIORNI_CALDO:
+            stato="Cliente caldo"; motivo=f"offerta di {gg} giorni fa"
+        elif gg is not None and gg<=GIORNI_RAFFREDDAMENTO:
+            stato="Cliente raffreddamento"; motivo=f"offerta di {gg} giorni fa, nessuna chiusura"
+        elif gg is not None:
+            stato="Da riprendere"; motivo=f"ultima offerta {gg} giorni fa"
+        else:
+            stato=None; motivo=None
+        out[cod]={
+            "stato_calcolato":stato,"motivo":motivo,
+            "contratti_aperti":(c["aperti"] if c else 0),
+            "contratti_tonnellate":round(c["tonnellate"],1) if c else 0,
+            "contratti_valore":round(c["valore"]) if c else 0,
+            "contratti_elenco":(c["elenco"][:6] if c else []),
+            "ultima_offerta":(o["data"].isoformat() if o else None),
+            "ultima_offerta_prezzo":(o["prezzo"] if o else None),
+            "ultima_offerta_margine":(o["margine"] if o else None),
+            "ultima_offerta_rif":(o["rif"] if o else None),
+            "giorni_da_offerta":gg,
+            "ultima_vendita":(ultima_vendita[cod].isoformat() if cod in ultima_vendita else None),
+        }
+    return out
+
 def main():
     token = get_access_token()
     print("Token ottenuto. Scarico il database...")
@@ -355,8 +444,22 @@ def main():
               f"{c['totale_costo']:,} EUR | non attribuite {c['non_attribuito']['tonnellate']:,.0f} t")
     except Exception as e:
         print("CBAM non calcolato:", e); snap["cbam"] = {}
+    # stato commerciale per cliente: contratti aperti e ricaduta delle offerte
     try:
-        snap["commerciale"] = blocco_commerciale(xlsx, leggi("/offerte.json",{}), leggi("/documenti.json",{}), anno)
+        offerte_db = leggi("/offerte.json",{}); documenti_db = leggi("/documenti.json",{})
+        stati = stato_commerciale(xlsx, offerte_db, documenti_db)
+        for c in snap.get("clienti",[]):
+            s = stati.get(str(c.get("codice") or "").strip())
+            if s: c.update(s)
+        from collections import Counter as _Cnt
+        rip=_Cnt(v["stato_calcolato"] for v in stati.values() if v["stato_calcolato"])
+        print("Stato commerciale:", dict(rip),
+              "| clienti con contratto aperto:", sum(1 for v in stati.values() if v["contratti_aperti"]))
+    except Exception as e:
+        print("Stato commerciale non calcolato:", e)
+        offerte_db = leggi("/offerte.json",{}); documenti_db = leggi("/documenti.json",{})
+    try:
+        snap["commerciale"] = blocco_commerciale(xlsx, offerte_db, documenti_db, anno)
         k = snap["commerciale"]
         print(f"Commerciale {anno}: offerte {k['offerte']['totale']} | contratti {k['contratti']['da_vendite']} "
               f"| conversione {k['conversione']}%")

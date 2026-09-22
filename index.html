@@ -48,7 +48,10 @@
   .card .row b{color:var(--mid);font-weight:600}
   .tag{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap}
   .t-caldo{background:#e2efda;color:#1f8a4c}.t-raffreddamento{background:#fff2cc;color:#8a6d00}
-  .t-fermo{background:#f2f2f2;color:#666}.t-ex{background:#eee;color:#888}.t-prospect{background:#ddeeff;color:var(--blue)}
+  .t-fermo{background:#f2f2f2;color:#666}
+  .t-contratto{background:#dff0e5;color:#186b3a}
+  .t-riprendere{background:#ede7f6;color:#5b3d8f}
+  .bandacontr{background:#dff0e5;color:#186b3a;border-radius:8px;padding:5px 9px;font-weight:600;font-size:12.5px}.t-ex{background:#eee;color:#888}.t-prospect{background:#ddeeff;color:var(--blue)}
   .empty{padding:40px 16px;text-align:center;color:var(--mid)}
 
   /* DRAWER */
@@ -241,6 +244,7 @@
       <input type="search" id="q" placeholder="Cerca ragione sociale, comune, referente…">
       <select id="fSettore"><option value="">Tutti i settori</option></select>
       <select id="fStatus"><option value="">Tutti gli stati</option></select>
+      <select id="fStatoCalc"><option value="">Stato commerciale</option><option>Contratto attivo</option><option>Cliente caldo</option><option>Cliente raffreddamento</option><option>Da riprendere</option><option value="__liberi">Senza contratto in corso</option></select>
       <select id="fProv"><option value="">Tutte le province</option></select>
     </div>
     <div class="count" id="count"></div>
@@ -366,7 +370,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "27";
+const APP_VERSION = "28";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -395,6 +399,14 @@ let USER = localStorage.getItem('crm_user')||"";
 let TIPO = "", PRESET = null, charts = {};
 
 function esc(s){return (s==null?"":String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function statoClass(t){
+  t=(t||"").toLowerCase();
+  if(t.includes("contratto")) return "t-contratto";
+  if(t.includes("caldo")) return "t-caldo";
+  if(t.includes("raffred")) return "t-raffreddamento";
+  if(t.includes("riprendere")) return "t-riprendere";
+  return tclass(t);
+}
 function tclass(t){t=(t||"").toLowerCase();
   if(t.includes("caldo"))return"t-caldo";if(t.includes("raffred"))return"t-raffreddamento";
   if(t.includes("fermo"))return"t-fermo";if(t.includes("ex"))return"t-ex";if(t.includes("prospect"))return"t-prospect";return"";}
@@ -496,15 +508,24 @@ function render(){
   let n=0;
   DATA.filter(c=>{
     if(fs&&c.settore!==fs)return false; if(fst&&c.status!==fst)return false; if(fp&&c.provincia!==fp)return false;
+    const fsc=document.getElementById('fStatoCalc').value;
+    if(fsc==="__liberi"){ if(c.contratti_aperti) return false; }
+    else if(fsc && (c.stato_calcolato||"")!==fsc) return false;
     if(TIPO&&c.tipologia!==TIPO)return false;
     if(PRESET&&!PRESET(c))return false;
     if(q){const b=((c.ragione||"")+" "+(c.comune||"")+" "+(c.referente||"")+" "+(c.codice||"")).toLowerCase(); if(!b.includes(q))return false;}
     return true;
   }).forEach(c=>{
     n++; const d=document.createElement('div'); d.className="card"; d.onclick=()=>openDrawer(c);
+    // lo stato calcolato dalle offerte e dai contratti prevale su quello scritto a mano
+    const st=c.stato_calcolato||c.tipologia;
     d.innerHTML=`<div class="top"><div><div class="rag">${esc(c.ragione)}</div>
         <div class="meta">${esc(c.settore||"—")} · ${esc(c.comune||"")} ${c.provincia?"("+esc(c.provincia)+")":""}</div></div>
-        <span class="tag ${tclass(c.tipologia)}">${esc(c.tipologia||"—")}</span></div>
+        <span class="tag ${statoClass(st)}">${esc(st||"—")}</span></div>
+      ${c.contratti_aperti?`<div class="row bandacontr">Contratto in corso · ${num(c.contratti_aperti)} ${c.contratti_aperti==1?'contratto':'contratti'} per ${tons(c.contratti_tonnellate)}</div>`:''}
+      ${c.ultima_offerta?`<div class="row"><b>Ultima offerta:</b> ${esc(c.ultima_offerta)}
+         ${c.ultima_offerta_prezzo?`· ${eurF(c.ultima_offerta_prezzo)} €/t`:''}
+         ${c.giorni_da_offerta!=null?`<span class="pmeta">(${c.giorni_da_offerta} gg)</span>`:''}</div>`:''}
       <div class="row"><b>Prossima azione:</b> ${esc(c.prossima_azione||"—")}</div>
       ${c.data_followup?`<div class="row"><b>Follow-up:</b> ${esc(c.data_followup)}</div>`:""}`;
     g.appendChild(d);
@@ -553,6 +574,21 @@ function openDrawer(c){
       ${inp("data_followup","Data follow-up",c.data_followup,"date")}
       ${inp("stato_followup","Stato follow-up",c.stato_followup)}
     </div>
+    ${c.stato_calcolato?`<div class="sec"><h3>Stato commerciale</h3>
+      <div class="costibox" style="margin:0">
+        <div class="totone" style="border:0;padding:0;margin:0">
+          <span class="tag ${statoClass(c.stato_calcolato)}" style="font-size:13px">${esc(c.stato_calcolato)}</span>
+          <b style="font-size:14px">${esc(c.motivo||'')}</b></div>
+        ${c.contratti_aperti?`<div class="pmeta" style="margin-top:8px">
+          ${num(c.contratti_aperti)} contratti aperti · ${tons(c.contratti_tonnellate)} · € ${num(c.contratti_valore)}
+          ${(c.contratti_elenco||[]).length?'<br>'+c.contratti_elenco.map(x=>esc(x.documento)+' ('+tons(x.tonnellate)+')').join(' · '):''}
+          <br><b>Fornitura in corso: non serve ricontattare per nuove quotazioni.</b></div>`:''}
+        ${c.ultima_offerta?`<div class="pmeta" style="margin-top:6px">Ultima offerta ${esc(c.ultima_offerta)}
+          ${c.ultima_offerta_prezzo?'· '+eurF(c.ultima_offerta_prezzo)+' €/t':''}
+          ${c.ultima_offerta_margine!=null?'· margine '+eurF(c.ultima_offerta_margine)+' €/t':''}
+          ${c.ultima_offerta_rif?'· '+esc(c.ultima_offerta_rif):''}</div>`:''}
+        ${c.ultima_vendita?`<div class="pmeta">Ultima fattura ${esc(c.ultima_vendita)}</div>`:''}
+      </div></div>`:''}
     ${bloccoOfferte(c.codice)}
     ${bloccoAttivita(c.codice)}
     <div class="sec"><h3>Note <button type="button" class="addbtn" onclick="showAdd('nota')">+ Aggiungi nota</button></h3>
@@ -1892,7 +1928,7 @@ document.querySelectorAll('.dsub button').forEach(b=>b.onclick=()=>{
   renderDash();
 });
 // i filtri manuali azzerano tipologia/preset impostati dai click dashboard
-['q','fSettore','fStatus','fProv'].forEach(id=>document.getElementById(id).addEventListener('input',()=>{TIPO="";PRESET=null;render();}));
+['q','fSettore','fStatus','fProv','fStatoCalc'].forEach(id=>document.getElementById(id).addEventListener('input',()=>{TIPO="";PRESET=null;render();}));
 
 // ---------- DASHBOARD ----------
 function euro(n){return "€ "+Math.round(n||0).toLocaleString('it-IT');}

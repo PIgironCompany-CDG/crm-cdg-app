@@ -58,17 +58,77 @@ def num(v):
 def cs(row): return [("" if c is None else str(c).strip()) for c in row]
 
 def parse_esposizione(b):
-    wb=openpyxl.load_workbook(io.BytesIO(b),data_only=True); righe=[]; giac=None
+    """L'esposizione è la fonte di verità sulla merce FISICAMENTE a terra.
+
+    Oltre alle voci finanziarie legge il foglio 'Giacenze', che elenca nave per nave
+    quanto c'è davvero in banchina: è il dato da confrontare con il magazzino invenduto,
+    che invece include anche il materiale contrattato non ancora arrivato.
+    """
+    wb=openpyxl.load_workbook(io.BytesIO(b),data_only=True); righe=[]; giac=None; data=None
     if "GHISA" in wb.sheetnames:
         for row in wb["GHISA"].iter_rows(values_only=True):
+            for c in row:
+                if isinstance(c,(datetime.date,datetime.datetime)) and data is None:
+                    data=(c.date() if isinstance(c,datetime.datetime) else c).isoformat()
+                # la giacenza complessiva è annotata in una cella di testo, non in colonna A
+                if isinstance(c,str) and "GIACENZA COMPLESSIVA" in c.upper():
+                    m=re.search(r'([\d.]+,\d+|[\d.]+)', c.split(":")[-1])
+                    if m: giac=num(m.group(1).replace(".","").replace(",","."))
             lab=row[0]
             if isinstance(lab,str) and lab.strip():
                 l=lab.strip()
-                if "GIACENZA COMPLESSIVA" in l.upper(): giac=num(row[1]) if len(row)>1 else None; continue
+                if "GIACENZA COMPLESSIVA" in l.upper(): continue
                 u=num(row[1]) if len(row)>1 else None; e=num(row[2]) if len(row)>2 else None
                 if u is not None or e is not None: righe.append({"voce":l,"usd":u,"eur":e})
+    # dettaglio delle giacenze a terra, nave per nave
+    terra=[]
+    if "Giacenze" in wb.sheetnames:
+        for row in wb["Giacenze"].iter_rows(values_only=True):
+            c=cs(row)
+            if len(c)<3: continue
+            nave=c[0]; orig=c[1]; t=num(c[2])
+            if t is None: continue
+            if not nave and not orig:                      # riga dei totali
+                if giac is None: giac=t
+                continue
+            terra.append({"nave":nave or None,"origine":(orig or None),"tonnellate":t,
+                          "prezzo_usd":num(c[3]) if len(c)>3 else None,
+                          "prezzo_eur":num(c[4]) if len(c)>4 else None,
+                          "valore_usd":num(c[5]) if len(c)>5 else None})
+    if giac is None and terra: giac=round(sum(x["tonnellate"] for x in terra),2)
     wb.close()
-    return {"righe":righe,"giacenza_ton":giac}
+    return {"righe":righe,"giacenza_ton":giac,"data":data,"a_terra":terra}
+
+
+def riconcilia_giacenze(op):
+    """Confronto fra la merce a terra (esposizione) e il disponibile del magazzino.
+
+    Le due fonti non devono coincidere: il magazzino include anche i carichi contrattati
+    ma non ancora sbarcati. Qui si rende esplicita la differenza invece di lasciarla
+    come discrepanza inspiegata fra due numeri."""
+    esp=(op.get("esposizione") or {})
+    terra=esp.get("a_terra") or []
+    tot_terra=esp.get("giacenza_ton") or round(sum(x["tonnellate"] for x in terra),1)
+    nv=(op.get("navi") or {})
+    carichi=nv.get("navi") or []
+    in_arrivo=0.0; a_terra_mag=0.0; negativi=0.0
+    for n in carichi:
+        d=n.get("disponibile") or 0
+        nome=str(n.get("nave") or "").upper()
+        if d<0: negativi+=d; continue
+        if "TBN" in nome or "DICEMBRE" in nome: in_arrivo+=d
+        else: a_terra_mag+=d
+    disp_mag=nv.get("disponibile_totale") or 0
+    return {
+        "data_esposizione": esp.get("data"),
+        "a_terra_esposizione": round(tot_terra or 0,1),
+        "disponibile_magazzino": round(disp_mag,1),
+        "in_arrivo": round(in_arrivo,1),
+        "a_terra_magazzino": round(a_terra_mag,1),
+        "sovravenduto": round(negativi,1),
+        "scarto": round((tot_terra or 0)-a_terra_mag,1),
+        "navi_terra": terra,
+    }
 
 def parse_magazzino(b):
     wb=openpyxl.load_workbook(io.BytesIO(b),data_only=True); voci=[]; usc={m:0 for m in MESI.values()}
@@ -100,7 +160,7 @@ def parse_magazzino(b):
     return {"magazzino":{"disponibile_totale":round(sum(v["disponibile"] or 0 for v in voci)),"voci":voci},
             "uscite_mensili":[{"mese":m,"tonnellate":usc[m]} for m in sorted(usc)]}
 
-NAVI_RE=r'SAGA|ENTERPRISE|IZUMO|HERMES|NAREE|TBN|SELECTA|MANX|KARANFIL|ELLAN|MALLIKA|STAR|LADY|OCEAN|BULK|SELECT'
+NAVI_RE=r'SAGA|ENTERPRISE|IZUMO|HERMES|NAREE|TBN|SELECTA|MANX|KARANFIL|ELLAN|MALLIKA|LILA|CASABLANCA|STAR|LADY|OCEAN|BULK|SELECT'
 # origine del materiale per il CBAM, dedotta dal nome del foglio del magazzino
 ORIGINE_FOGLIO=[("BRASIL","BRASILE"),("ZAPO","UCRAINA"),("UCRAIN","UCRAINA"),
                 ("RUSS","RUSSIA"),("KOSAYA","RUSSIA"),("URAL","RUSSIA")]
@@ -764,6 +824,12 @@ def main():
         elif kind=="uscite":
             if not op.get("uscite_mensili"): op["uscite_mensili"]=parse_uscite(dl(t,e["path_lower"])); changed=True
     if changed:
+        try:
+            op["riconciliazione"]=riconcilia_giacenze(op)
+            rc=op["riconciliazione"]
+            print(f"   giacenze: a terra {rc['a_terra_esposizione']:,.0f} t (esposizione) · "
+                  f"magazzino {rc['disponibile_magazzino']:,.0f} t di cui {rc['in_arrivo']:,.0f} in arrivo")
+        except Exception as ex: print("   riconciliazione non calcolata:",ex)
         ul(t,OPERATIVA,json.dumps(op,ensure_ascii=False).encode("utf-8")); print("operativa.json aggiornato.")
     # DATABASE: bilanci (credito) + DETTAGLIO (esposizione per cliente -> Master, ordini aperti -> Vendite)
     bil=[e for e in files if classify(e["name"])=="bilancio"]
