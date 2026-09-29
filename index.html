@@ -35,6 +35,9 @@
   header .sp{flex:1}
   header .who{font-size:12px;color:#cbd3db;max-width:40vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   header button{background:#3a4450;color:#fff;border:0;border-radius:8px;padding:7px 12px;font-size:13px;font-weight:600}
+  #btnAgg{padding:6px 10px;font-size:15px;line-height:1}
+  #aggTs{font-size:11px;opacity:.75;white-space:nowrap}
+  @media(max-width:600px){#aggTs{display:none}}
   nav.tabs{display:flex;gap:4px;background:#fff;border-bottom:1px solid var(--line);padding:0 12px;position:sticky;top:52px;z-index:4}
   nav.tabs button{background:none;border:0;padding:12px 14px;font-size:14px;font-weight:600;color:var(--mid);border-bottom:2px solid transparent}
   nav.tabs button.on{color:var(--dark);border-bottom-color:var(--dark)}
@@ -246,6 +249,10 @@
   .cday .add{position:absolute;top:4px;right:5px;border:0;background:transparent;color:var(--mid);font-size:14px;opacity:0;padding:0 3px}
   .cday:hover .add{opacity:.7}
   .ev{display:block;width:100%;text-align:left;border:0;border-radius:6px;padding:3px 6px;margin-bottom:3px;font-size:11.5px;line-height:1.25;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ev i{font-style:normal;font-weight:800;font-size:8.5px;letter-spacing:.04em;opacity:.85;
+        background:rgba(255,255,255,.22);padding:1px 3px;border-radius:3px;margin-right:4px}
+  .ev em{font-style:normal;opacity:.85;margin-right:4px}
+  .ev.off{background-image:linear-gradient(90deg,rgba(255,255,255,.18) 0 3px,transparent 3px)}
   .ev.fatta{opacity:.55;text-decoration:line-through}
   .ev.scaduta{box-shadow:inset 0 0 0 2px #c0392b}
   .weekgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:10px}
@@ -310,6 +317,8 @@
   <header>
     <h1 id="title">CRM CDG</h1>
     <span class="sp"></span>
+    <span class="who" id="aggTs"></span>
+    <button id="btnAgg" title="Rileggi i dati dal server">⟳</button>
     <span class="who" id="who"></span>
     <button id="logout">Esci</button>
   </header>
@@ -456,7 +465,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "30";
+const APP_VERSION = "31";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -622,9 +631,10 @@ function render(){
   document.getElementById('empty').classList.toggle('hidden', n>0);
 }
 
-let CURRENT=null;
+let CURRENT=null, CURRENT_COD=null;
 function escAttr(s){return esc(s).replace(/"/g,'&quot;');}
 function openDrawer(c){
+  CURRENT_COD=c&&c.codice;
   CURRENT=c;
   const d=document.getElementById('drawer');
   const ro=(k,v)=>`<div class="k">${k}</div><div>${esc(v||"—")}</div>`;
@@ -789,7 +799,7 @@ async function saveNuovo(){
   if(ok&&j.entry){
     DATA.push(Object.assign({status:"Prospect",stato_attivita:"Da fare"},j.entry.fields));
     msg.textContent="Creato ✓ (nel database entro pochi minuti)";
-    renderPStrip(); render(); setTimeout(closeDrawer,1200);
+    await dopoModifica('clienti'); setTimeout(closeDrawer,1200);
   } else msg.textContent=(j&&j.error)||"Errore nella creazione.";
   btn.disabled=false; btn.textContent="Crea cliente";
 }
@@ -858,14 +868,14 @@ async function saveForn(codice){
   if(!fields.ragione){ msg.textContent="La ragione sociale è obbligatoria."; return; }
   btn.disabled=true; btn.textContent="Salvataggio…"; msg.textContent="";
   const {ok,j}=await apiPost('/fornitore',{codice:codice||fields.codice||"",fields});
-  if(ok&&j.codice){ FORN[j.codice]=j.fornitore; msg.textContent="Salvato ✓"; renderForn(); setTimeout(closeDrawer,900); }
+  if(ok&&j.codice){ FORN[j.codice]=j.fornitore; msg.textContent="Salvato ✓"; await dopoModifica('fornitori'); setTimeout(closeDrawer,900); }
   else msg.textContent=(j&&j.error)||"Errore nel salvataggio.";
   btn.disabled=false; btn.textContent=codice?'Salva modifiche':'Crea fornitore';
 }
 async function delForn(codice){
   if(!confirm('Eliminare questo fornitore?')) return;
   const {ok}=await apiPost('/fornitore-delete',{codice});
-  if(ok){ delete FORN[codice]; closeDrawer(); renderForn(); } else alert("Errore nell'eliminazione.");
+  if(ok){ delete FORN[codice]; closeDrawer(); await dopoModifica('fornitori'); } else alert("Errore nell'eliminazione.");
 }
 document.getElementById('btnNuovoForn').onclick=()=>openForn(null);
 ['qf','fTipoF'].forEach(id=>document.getElementById(id).addEventListener('input',renderForn));
@@ -890,7 +900,7 @@ async function addInter(tp){
         scadenza:scadenza||null});
     }
     ta.value=''; if(dueEl) dueEl.value=''; if(asEl) asEl.value='';
-    showAdd(tp); renderInter(cod);
+    showAdd(tp); renderInter(cod); dopoModifica();
   }
   else alert('Errore nel salvataggio.');
 }
@@ -1580,15 +1590,20 @@ async function salvaOff(id){
   fields.cbam_eur_t=fields.cbam_manuale!=null?fields.cbam_manuale:calcolaCbam(fields.origine,anno,false).eur_t;
   btn.disabled=true; btn.textContent="Salvataggio…";
   const {ok,j}=await apiPost('/offerta',{id:id||null,fields});
-  if(ok&&j.offerta){ OFF[j.offerta.id]=j.offerta; msg.textContent="Salvato ✓"; renderOff();
-    if(!id) setTimeout(()=>apriOff(j.offerta.id),600); }
+  if(ok&&j.offerta){
+    OFF[j.offerta.id]=j.offerta;
+    if(j.attivita) ATT[j.attivita.id]=j.attivita;   // l'offerta entra subito in calendario
+    msg.textContent="Salvato ✓ · in calendario il "+(j.offerta.data||"");
+    await dopoModifica('off');
+    if(!id) setTimeout(()=>apriOff(j.offerta.id),600);
+  }
   else { msg.textContent=(j&&j.error)||"Errore nel salvataggio."; }
   btn.disabled=false; btn.textContent=id?'Salva':'Crea offerta';
 }
 async function delOff(id){
   if(!confirm("Eliminare questa offerta?")) return;
   const {ok,j}=await apiPost('/offerta-delete',{id});
-  if(ok){ delete OFF[id]; closeDrawer(); renderOff(); } else alert((j&&j.error)||"Errore.");
+  if(ok){ delete OFF[id]; closeDrawer(); await dopoModifica('off'); } else alert((j&&j.error)||"Errore.");
 }
 // Documento per il cliente: riproduce il format dell'offerta UNICOAL.
 // Si apre in una finestra a parte e si salva in PDF con la stampa del browser,
@@ -1679,8 +1694,7 @@ async function segnaEmessa(id){
   if(ok&&j.offerta){
     OFF[id]=j.offerta;
     if(j.attivita) ATT[j.attivita.id]=j.attivita;
-    renderOff(); if(typeof renderCal==="function") renderCal();
-    await ricaricaInter();
+    await dopoModifica('off');
   }
 }
 // ---------- DOCUMENTI ARCHIVIATI (offerte e contratti caricati) ----------
@@ -1783,7 +1797,7 @@ function assegnaDoc(id){
     btn.disabled=true; btn.textContent="Salvataggio…";
     const {ok,j}=await apiPost('/documento-assegna',{id,codice:cod,ragione:rag,
       contratto:document.getElementById('dc_contr').value});
-    if(ok&&j.documento){ DOCS[id]=j.documento; msg.textContent="Salvato ✓"; renderDocs(); setTimeout(closeDrawer,700); }
+    if(ok&&j.documento){ DOCS[id]=j.documento; msg.textContent="Salvato ✓"; await dopoModifica('off'); setTimeout(closeDrawer,700); }
     else { msg.textContent=(j&&j.error)||"Errore."; btn.disabled=false; btn.textContent="Salva"; }
   };
   dr.classList.add('open'); document.getElementById('ov').classList.add('open');
@@ -1890,13 +1904,18 @@ function renderDaEsitare(){
   box.innerHTML=`Hai ${l.length} attività da chiudere. La più vecchia: <b onclick="apriEsito('${p.id}')">`+
     `${esc(p.tipo)} del ${esc(p.data)}${p.cliente?(" — "+esc(p.cliente)):""} · registra l'esito</b>`;
 }
+// sigla del tipo: nel calendario si deve capire a colpo d'occhio cosa c'è,
+// non solo con chi. Prima comparivano tutte le voci con il solo nome del cliente.
+const SIGLA_ATT={chiamata:"TEL",appuntamento:"APP",visita:"VIS",mail:"MAIL",offerta:"OFF"};
 function eventoHTML(a){
   const col=coloreUtente(a.owner);
   const scad=(a.stato==="pianificata" && a.data<oggiIso());
-  const et=(a.ora?a.ora+" ":"")+(a.cliente||a.titolo||a.tipo);
-  return `<button class="ev ${a.stato==="fatta"?"fatta":""} ${scad?"scaduta":""}" style="background:${col}"
-    title="${escAttr((a.ora||"")+" "+(a.tipo||"")+" · "+(a.cliente||"")+" · "+nomeBreve(a.owner))}"
-    onclick="apriAtt('${a.id}')">${esc(et)}</button>`;
+  const sig=SIGLA_ATT[a.tipo]||String(a.tipo||"").slice(0,3).toUpperCase();
+  const et=(a.cliente||a.titolo||a.tipo);
+  return `<button class="ev ${a.stato==="fatta"?"fatta":""} ${scad?"scaduta":""} ${a.tipo==='offerta'?'off':''}"
+    style="background:${col}"
+    title="${escAttr((a.tipo||"")+(a.ora?" "+a.ora:"")+" · "+(a.cliente||"")+" · "+(a.titolo||"")+" · "+nomeBreve(a.owner))}"
+    onclick="apriAtt('${a.id}')"><i>${sig}</i>${a.ora?'<em>'+esc(a.ora)+'</em>':''}${esc(et)}</button>`;
 }
 function renderCal(){
   const wrap=document.getElementById('calWrap'); if(!wrap) return;
@@ -1935,6 +1954,7 @@ function renderCal(){
   document.getElementById('calLeg').innerHTML=
     UTENTI.map(u=>`<span><i style="background:${coloreUtente(u)}"></i>${esc(nomeBreve(u))}</span>`).join("")+
     '<span><i style="background:#8d99a6"></i>offerte in archivio</span>'+
+    '<span style="opacity:.8">TEL chiamata · APP appuntamento · VIS visita · MAIL mail · OFF offerta</span>'+
     '<span><i style="background:#fff;box-shadow:inset 0 0 0 2px #c0392b"></i>in ritardo</span>'+
     '<span style="text-decoration:line-through">conclusa</span>';
   renderDaEsitare();
@@ -1989,14 +2009,14 @@ async function salvaAtt(id){
   if(!fields.data){ msg.textContent="Serve una data."; return; }
   btn.disabled=true; btn.textContent="Salvataggio…";
   const {ok,j}=await apiPost('/attivita',{id:id||null,fields});
-  if(ok&&j.attivita){ ATT[j.attivita.id]=j.attivita; msg.textContent="Salvato ✓"; renderCal(); renderPStrip(); render();
+  if(ok&&j.attivita){ ATT[j.attivita.id]=j.attivita; msg.textContent="Salvato ✓"; await dopoModifica('cal');
     if(j.attivita.codice && CURRENT_COD===j.attivita.codice) {} setTimeout(closeDrawer,700); }
   else { msg.textContent=(j&&j.error)||"Errore nel salvataggio."; btn.disabled=false; btn.textContent="Salva"; }
 }
 async function delAtt(id){
   if(!confirm("Eliminare questa attività?")) return;
   const {ok,j}=await apiPost('/attivita-delete',{id});
-  if(ok){ delete ATT[id]; closeDrawer(); renderCal(); renderPStrip(); render(); } else alert((j&&j.error)||"Errore.");
+  if(ok){ delete ATT[id]; closeDrawer(); await dopoModifica('cal'); } else alert((j&&j.error)||"Errore.");
 }
 // Chiusura dell'attività: esito + se è stata fatta un'offerta + eventuale prossimo passo
 function apriEsito(id){
@@ -2033,7 +2053,7 @@ function apriEsito(id){
     if(ok&&j.attivita){
       ATT[j.attivita.id]=j.attivita; if(j.creata) ATT[j.creata.id]=j.creata;
       if(j.attivita.codice){ await ricaricaInter(); }
-      msg.textContent="Registrato ✓"; renderCal(); renderPStrip(); render(); setTimeout(closeDrawer,700);
+      msg.textContent="Registrato ✓"; await dopoModifica('cal'); setTimeout(closeDrawer,700);
     } else { msg.textContent=(j&&j.error)||"Errore."; btn.disabled=false; btn.textContent="Registra esito"; }
   };
   d.classList.add('open'); document.getElementById('ov').classList.add('open');
@@ -2548,7 +2568,71 @@ async function start(){
   popolaOwnerCal();
   updateBadge();        // contatore Inbox
   renderDaEsitare();    // contatore Calendario
+  segnaAggiornato();
+  avviaAggiornamentoPeriodico();
+  const ba=document.getElementById('btnAgg');
+  if(ba) ba.onclick=()=>dopoModifica();
 }
+// ============ AGGIORNAMENTO DOPO LE MODIFICHE ============
+// Ricaricare la pagina intera sarebbe brutale: perde il punto in cui sei, richiede
+// un nuovo giro di login e scarica di nuovo tutto. Qui si rileggono solo i dati dal
+// server e si ridisegna ciò che è a schermo: l'effetto è lo stesso, in una frazione
+// del tempo. Vale anche per le modifiche fatte dai colleghi.
+let ULTIMO_AGG=null, AGG_INCORSO=false;
+function tabAttivo(){
+  const b=document.querySelector('nav.tabs button.on');
+  return b?b.dataset.tab:'clienti';
+}
+function ridisegnaTuttoIlVisibile(){
+  const t=tabAttivo();
+  render(); renderPStrip();          // la lista clienti e i filtri sono sempre validi
+  updateBadge(); renderDaEsitare();  // contatori in alto
+  // ridisegna solo le sezioni già aperte almeno una volta
+  if(SEZ_PRONTE['cal']) renderCal();
+  if(SEZ_PRONTE['off']){ renderOff(); renderDocs(); }
+  if(SEZ_PRONTE['fornitori']) renderForn();
+  if(SEZ_PRONTE['inbox']) renderInbox();
+  if(SEZ_PRONTE['cbam']) renderCbam();
+  if(t==='dash') renderDash();
+  if(CURRENT_COD){                   // se una scheda cliente è aperta, aggiorna anche quella
+    const c=DATA.find(x=>x.codice===CURRENT_COD);
+    if(c && document.getElementById('drawer').classList.contains('open')) openDrawer(c);
+  }
+}
+function segnaAggiornato(){
+  ULTIMO_AGG=new Date();
+  const e=document.getElementById('aggTs');
+  if(e) e.textContent="dati aggiornati alle "+ULTIMO_AGG.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'});
+}
+async function dopoModifica(sezione){
+  if(AGG_INCORSO) return;
+  AGG_INCORSO=true;
+  const ind=document.getElementById('aggTs');
+  if(ind) ind.textContent="aggiorno…";
+  try{
+    await loadData();                // rilegge tutto dal server: offerte, attività, note, documenti
+    ridisegnaTuttoIlVisibile();
+    segnaAggiornato();
+  }catch(e){
+    if(ind) ind.textContent="aggiornamento non riuscito";
+  }finally{ AGG_INCORSO=false; }
+}
+// Controllo periodico: mentre la scheda è in primo piano si rilegge ogni 90 secondi,
+// così le modifiche dei colleghi compaiono da sole senza premere nulla.
+let TIMER_AGG=null;
+function avviaAggiornamentoPeriodico(){
+  if(TIMER_AGG) clearInterval(TIMER_AGG);
+  TIMER_AGG=setInterval(()=>{
+    if(document.visibilityState!=='visible') return;
+    if(document.getElementById('drawer').classList.contains('open')) return; // non mentre stai scrivendo
+    dopoModifica();
+  }, 90000);
+}
+document.addEventListener('visibilitychange',()=>{
+  // tornando sulla scheda dopo più di due minuti, si rilegge subito
+  if(document.visibilityState==='visible' && ULTIMO_AGG && (Date.now()-ULTIMO_AGG)>120000) dopoModifica();
+});
+
 // sezioni già disegnate almeno una volta
 const SEZ_PRONTE={};
 function assicuraSezione(tab){
