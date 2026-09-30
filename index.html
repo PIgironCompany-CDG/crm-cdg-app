@@ -465,7 +465,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "31";
+const APP_VERSION = "32";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -931,127 +931,284 @@ function cbamDettaglio(origine,anno,verificati,prezzo){
   return {base,magg:maggApplicata,fatt,bm,emiss,detr,netto,eur_t:netto*prezzo,
           ipotesi:verificati&&o.emissioni_verificate==null};
 }
-const nf=(v,d)=>Number(v||0).toLocaleString('it-IT',{minimumFractionDigits:d==null?2:d,maximumFractionDigits:d==null?2:d});
-const anniCbam=()=>Object.keys((CBAM||{}).fattore||{}).filter(y=>/^\d{4}$/.test(y)).sort();
+// Il calcolatore riproduce riga per riga il foglio CALCOLATORE_CBAM.xlsx
+// (anno, trimestre ETS, paese, prodotto, quantità, tipo emissioni -> SEFA, FAA,
+// emissioni dichiarate, quota CBAM, costo) ed è esteso a tutte le merci
+// dell'allegato I e a tutti i paesi del file ufficiale, non solo alla ghisa.
+// I dati stanno in cbam-valori.json, generato da tools/estrai_cbam_valori.py.
+// cbamDettaglio() resta invariato: dashboard, vendite e magazzino continuano a usarlo.
+let CB_TAB="valori";          // tabella di consultazione attiva
+let CBV=null, CBV_ERR="";     // dataset ufficiale, caricato al primo ingresso
+const CB_ALTRI="Altri paesi e territori";
+const CB_IV="Origine non documentata (all. IV)";
+const CB_UE="UE o paese escluso (all. III)";
+const CB_SPECIALI=[CB_ALTRI,CB_IV,CB_UE];
 
-let CB_TAB="valori";   // tabella di consultazione attiva nel calcolatore
+async function caricaValoriCbam(){
+  if(CBV||CBV_ERR) return CBV;
+  try{
+    const r=await fetch('cbam-valori.json?_='+APP_VERSION,{cache:'force-cache'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    CBV=await r.json();
+    CBV._voci={}; CBV.voci.forEach(v=>CBV._voci[v.k]=v);
+  }catch(e){ CBV_ERR=String(e.message||e); }
+  return CBV;
+}
+
+// Valore predefinito applicabile e sua provenienza.
+// Regola: se il paese è elencato ma per quella merce non c'è un valore (o «-»),
+// si usa la tabella «Altri paesi e territori» (nota all'allegato I, rettifica 2026/1740).
+function cbValore(cn,paese){
+  if(paese===CB_UE) return {tot:0,fonte:"escluso"};
+  if(paese===CB_IV){ const v=(CBV.allegatoIV||{})[cn]; return v?{tot:v[2],dir:v[0],ind:v[1],fonte:"allegatoIV"}:null; }
+  if(paese!==CB_ALTRI){
+    const v=((CBV.paesi||{})[paese]||{})[cn];
+    if(v && v[2]!=null) return {tot:v[2],dir:v[0],ind:v[1],fonte:"paese"};
+  }
+  const a=(CBV.altri||{})[cn];
+  return a?{tot:a[2],dir:a[0],ind:a[1],fonte:paese===CB_ALTRI?"altri":"ripiego"}:null;
+}
+// Maggiorazione 10/20/30 % (2026/2027/dal 2028), ma 1 % fisso per i concimi.
+function cbMaggiorazione(settore,anno){
+  const M=(CBV.maggiorazione)||{};
+  const tab=(settore==="Concimi"?M.Concimi:M.standard)||{};
+  const y=String(Math.min(Math.max(anno,2026),2028));
+  return tab[y]!=null?tab[y]:(settore==="Concimi"?0.01:0.30);
+}
+// Prezzo ETS del trimestre, come nel foglio: media del trimestre, non media annua.
+function cbPrezzoTrim(anno,trim){
+  const e=(CBV&&CBV.ets)||{};
+  const k=anno+"-"+trim;
+  if(e[k]!=null) return {valore:e[k],noto:true,periodo:k};
+  const noti=Object.keys(e).sort();
+  const ult=noti[noti.length-1];
+  return {valore:ult?e[ult]:((CBAM||{}).prezzo_certificato||75.28),noto:false,periodo:ult||"—"};
+}
+// Il calcolo, con la stessa catena del foglio Excel.
+// Due metodi distinti: valori predefiniti -> base maggiorata e benchmark colonna B;
+// emissioni verificate -> emissione reale senza maggiorazione e benchmark colonna A.
+function cbCalcolo(st){
+  if(!CBV) return null;
+  const voce=CBV._voci[st.cn]; if(!voce) return null;
+  const val=cbValore(st.cn,st.paese); if(!val) return null;
+  const fatt=(CBV.fattore||{})[String(st.anno)]; if(fatt==null) return null;
+  const cscf=(CBV.cscf&&CBV.cscf[String(st.anno)]!=null)?CBV.cscf[String(st.anno)]:1;
+  const lista=(CBV.bench||{})[st.cn]||[];
+  const bm=lista[Math.min(st.bench||0,Math.max(lista.length-1,0))]||{};
+  const verif=(st.reali!=null && st.reali!=="" && !isNaN(st.reali) && Number(st.reali)>0);
+  const magg=verif?0:cbMaggiorazione(voce.s,st.anno);
+  const base=verif?Number(st.reali):val.tot;
+  const b=(verif?bm.A:bm.B);
+  // Emissioni specifiche. Dove la Gazzetta pubblica il valore già maggiorato si usa
+  // quello: la base pubblicata è arrotondata a 3 decimali mentre quella usata dalla
+  // Commissione no, quindi base × (1+maggiorazione) non sempre torna all'ultimo decimale.
+  const pubTab=((CBV.maggiorati||{})[st.cn]||{});
+  const pub=pubTab[st.paese] || (val.fonte==="ripiego"||val.fonte==="altri" ? pubTab[CB_ALTRI] : null);
+  const pubblicato=(!verif && pub && pub[String(st.anno)]!=null);
+  const emiss=pubblicato ? pub[String(st.anno)] : base*(1+magg);   // tCO2/t
+  const sefa=(b!=null?b:0)*fatt*cscf;           // SEFA: benchmark x fattore CBAM x CSCF
+  const ton=Number(st.ton)||0;
+  const faa=sefa*ton;                           // FAA: assegnazione gratuita riconosciuta
+  const dich=emiss*ton;                         // emissioni dichiarate
+  const quota=Math.max(dich-faa,0);             // quota CBAM: mai negativa
+  const netto=Math.max(emiss-sefa,0);
+  return {voce,val,fatt,cscf,magg,base,bm:b,colonna:verif?'A':'B',emiss,sefa,faa,
+          dich,quota,costo:quota*st.prezzo,netto,eur_t:netto*st.prezzo,
+          verif,pubblicato,percorsi:lista,fonte:val.fonte};
+}
+const nf=(v,d)=>Number(v||0).toLocaleString('it-IT',{minimumFractionDigits:d==null?2:d,maximumFractionDigits:d==null?2:d});
+const anniCbam=()=>Object.keys((CBV&&CBV.fattore)||(CBAM||{}).fattore||{}).filter(y=>/^\d{4}$/.test(y)).sort();
 
 // ---------- PANE CALCOLATORE ----------
-function renderCbamCalc(){
+async function renderCbamCalc(){
   const box=document.getElementById('c-calc'); if(!box) return;
-  const C=CBAM||{}; const origini=Object.keys(C.origini||{}).filter(o=>o!=="UE");
-  const anno=new Date().getFullYear();
-  const st=window.CB_STATO||(window.CB_STATO={origine:"BRASILE",anno:anno,ton:1000,
-                             prezzo:C.prezzo_certificato||75.28,verificati:false});
-  if(!C.origini||!origini.length){ box.innerHTML='<div class="nota">Parametri CBAM non ancora disponibili.</div>'; return; }
+  if(!CBV&&!CBV_ERR){ box.innerHTML='<div class="nota">Caricamento dei valori ufficiali…</div>'; await caricaValoriCbam(); }
+  if(!CBV){ box.innerHTML='<div class="avviso warn">Non riesco a caricare <b>cbam-valori.json</b> ('+esc(CBV_ERR)+
+      '): il file va pubblicato accanto all\'app.</div>'; return; }
+  const oggi=new Date();
+  const st=window.CB_STATO||(window.CB_STATO={
+    cn:"7201", paese:"Brasile", anno:Math.max(oggi.getFullYear(),2026),
+    trim:"Q"+(Math.floor(oggi.getMonth()/3)+1), ton:1000, prezzo:null,
+    bench:0, reali:"", settore:"Ferro e acciaio", cerca:""});
+  if(st.prezzo==null) st.prezzo=cbPrezzoTrim(st.anno,st.trim).valore;
+  const settori=[...new Set(CBV.voci.map(v=>v.s))];
+  const paesi=Object.keys(CBV.paesi||{}).sort((a,b)=>a.localeCompare(b,'it'));
+  const q=(st.cerca||"").toLowerCase().replace(/ /g,'');
+  let voci=CBV.voci.filter(v=>v.s===st.settore);
+  if(q) voci=voci.filter(v=>v.c.replace(/ /g,'').includes(q)||v.d.toLowerCase().includes(q));
+  if(voci.length && !voci.some(v=>v.k===st.cn)) st.cn=voci[0].k;
+  const comm=(CBV.prodotti||[]);
+
   box.innerHTML=`
-    <div class="kpis" id="cb_kpis"></div>
-    <div class="chartbox wide"><h4>Parametri</h4>
+    <div class="chartbox wide"><h4>Calcolatore</h4>
       <div class="parbox">
-        <div><label class="fl">Origine</label><select class="fi" id="cb_orig">
-          ${origini.map(o=>`<option${o===st.origine?' selected':''}>${esc(o)}</option>`).join("")}</select></div>
-        <div><label class="fl">Anno</label><select class="fi" id="cb_anno">
+        <div><label class="fl">Anno CBAM</label><select class="fi" id="cb_anno">
           ${anniCbam().map(y=>`<option${+y===st.anno?' selected':''}>${y}</option>`).join("")}</select></div>
-        <div><label class="fl">Quantità (t)</label><input class="fi num" id="cb_ton" type="number" value="${st.ton}"></div>
-        <div><label class="fl">Prezzo certificato (€)</label><input class="fi num" id="cb_prezzo" type="number" step="0.01" value="${st.prezzo}"></div>
+        <div><label class="fl">Trimestre ETS</label><select class="fi" id="cb_trim">
+          ${["Q1","Q2","Q3","Q4"].map(t=>`<option${t===st.trim?' selected':''}>${t}</option>`).join("")}</select></div>
+        <div><label class="fl">Paese di origine</label><select class="fi" id="cb_pae">
+          ${CB_SPECIALI.map(s=>`<option${s===st.paese?' selected':''}>${esc(s)}</option>`).join("")}
+          <option disabled>----------</option>
+          ${paesi.map(p=>`<option${p===st.paese?' selected':''}>${esc(p)}</option>`).join("")}</select></div>
+        <div><label class="fl">Quantità importata (t)</label><input class="fi num" id="cb_ton" type="number" value="${st.ton}"></div>
+        <div><label class="fl">Prezzo ETS (€/t)</label><input class="fi num" id="cb_prezzo" type="number" step="0.01" value="${Math.round(st.prezzo*100)/100}"></div>
+        <div><label class="fl">Emissioni verificate (tCO2/t)</label><input class="fi num" id="cb_reali" type="number" step="0.001" placeholder="vuoto = DEFAULT" value="${esc(st.reali)}"></div>
       </div>
-      <label class="chk" style="margin-top:10px"><input type="checkbox" id="cb_ver"${st.verificati?' checked':''}>
-        base emissioni: dati verificati anziché valore predefinito</label>
+      <div class="parbox" style="margin-top:10px">
+        <div><label class="fl">Prodotto commerciale</label><select class="fi" id="cb_comm">
+          <option value="">— scegli dal catalogo completo —</option>
+          ${comm.map(p=>`<option value="${p.k}">${esc(p.n)}</option>`).join("")}</select></div>
+        <div><label class="fl">Settore</label><select class="fi" id="cb_set">
+          ${settori.map(s=>`<option${s===st.settore?' selected':''}>${esc(s)}</option>`).join("")}</select></div>
+        <div><label class="fl">Cerca codice o descrizione</label>
+          <input class="fi" id="cb_cerca" type="search" placeholder="es. 7203, wire, urea" value="${esc(st.cerca)}"></div>
+      </div>
+      <div style="margin-top:10px"><label class="fl">Merce (codice NC)</label><select class="fi" id="cb_cn">
+        ${voci.map(v=>`<option value="${v.k}"${v.k===st.cn?' selected':''}>${esc(v.c)} — ${esc(v.d.slice(0,90))}${v.d.length>90?'…':''}</option>`).join("")}
+        ${voci.length?'':'<option value="">nessuna merce corrisponde alla ricerca</option>'}</select></div>
+      <div id="cb_percorso" style="margin-top:10px"></div>
+      <p class="hint" id="cb_hintpz"></p>
     </div>
+    <div class="kpis" id="cb_kpis"></div>
     <div class="heroval" id="cb_hero"></div>
+    <div id="cb_avviso"></div>
     <div class="chartbox wide"><h4>Proiezione ${anniCbam()[0]}–${anniCbam().slice(-1)[0]}</h4>
       <div id="cb_graf"></div>
       <p class="hint">A parità di prezzo del certificato. Il costo cresce perché la maggiorazione sale e il fattore CBAM scende.</p>
     </div>
-    <div class="nota" id="cb_delta"></div>
-    <div class="chartbox wide"><h4>Confronto fra origini, ${st.anno}</h4>
+    <div class="chartbox wide"><h4>Stessa merce, altre origini</h4>
       <div class="barre-cfr" id="cb_orig_cfr"></div>
+      <p class="hint">Solo i paesi con un valore proprio per questa merce, più la tabella «Altri paesi e territori»
+        in cui ricadono tutti gli altri.</p>
     </div>
     <div class="dsub" id="cb_tabs">
-      <button data-t="valori" class="${CB_TAB==='valori'?'on':''}">Valori predefiniti</button>
+      <button data-t="valori" class="${CB_TAB==='valori'?'on':''}">Valori per paese</button>
+      <button data-t="merci" class="${CB_TAB==='merci'?'on':''}">Merci del settore</button>
       <button data-t="benchmark" class="${CB_TAB==='benchmark'?'on':''}">Benchmark</button>
       <button data-t="fattori" class="${CB_TAB==='fattori'?'on':''}">Fattori e maggiorazioni</button>
-      <button data-t="prezzi" class="${CB_TAB==='prezzi'?'on':''}">Prezzi certificato</button>
+      <button data-t="prezzi" class="${CB_TAB==='prezzi'?'on':''}">Prezzi ETS</button>
     </div>
     <div class="tabwrap"><table class="tab-dati" id="cb_tabella"></table></div>
     <div class="nota" id="cb_fonte"></div>`;
-  ['cb_orig','cb_anno','cb_ton','cb_prezzo','cb_ver'].forEach(i=>{
-    const e=document.getElementById(i); if(!e) return;
-    e.addEventListener('input',leggiStatoCbam); e.addEventListener('change',leggiStatoCbam);
-  });
-  document.querySelectorAll('#cb_tabs button').forEach(b=>b.onclick=()=>{
+
+  ['cb_anno','cb_trim','cb_pae','cb_ton','cb_prezzo','cb_reali','cb_comm','cb_set','cb_cerca','cb_cn']
+    .forEach(i=>{ const e=document.getElementById(i); if(!e) return;
+      e.addEventListener('change',()=>leggiStatoCbam(i));
+      if(e.tagName==='INPUT') e.addEventListener('input',()=>leggiStatoCbam(i));
+    });
+  document.querySelectorAll('#tab-cbam #cb_tabs button[data-t]').forEach(b=>b.onclick=()=>{
     CB_TAB=b.dataset.t;
-    document.querySelectorAll('#cb_tabs button').forEach(x=>x.classList.toggle('on',x===b));
+    document.querySelectorAll('#tab-cbam #cb_tabs button[data-t]').forEach(x=>x.classList.toggle('on',x===b));
     tabellaCbam();
   });
   aggiornaCalcolatore();
 }
-function leggiStatoCbam(){
+
+function leggiStatoCbam(campo){
   const g=i=>{const e=document.getElementById(i); return e?e.value:"";};
-  window.CB_STATO={origine:g('cb_orig'),anno:parseInt(g('cb_anno'),10),
-    ton:valNum(g('cb_ton')),prezzo:valNum(g('cb_prezzo')),
-    verificati:document.getElementById('cb_ver').checked};
+  const st=window.CB_STATO;
+  const prima={set:st.settore,cerca:st.cerca};
+  st.anno=parseInt(g('cb_anno'),10); st.trim=g('cb_trim'); st.paese=g('cb_pae');
+  st.ton=valNum(g('cb_ton')); st.reali=g('cb_reali');
+  st.settore=g('cb_set'); st.cerca=g('cb_cerca');
+  // il prodotto commerciale è una scorciatoia: imposta la merce e ne allinea il settore
+  if(campo==='cb_comm'){
+    const k=g('cb_comm');
+    if(k){ const v=CBV._voci[k]; st.cn=k; st.bench=0; if(v) st.settore=v.s; st.cerca=""; renderCbamCalc(); return; }
+  }else if(g('cb_cn')) st.cn=g('cb_cn');
+  if(campo==='cb_cn') st.bench=0;
+  // cambiando anno o trimestre il prezzo torna a quello ufficiale del periodo
+  if(campo==='cb_anno'||campo==='cb_trim'){ st.prezzo=cbPrezzoTrim(st.anno,st.trim).valore; renderCbamCalc(); return; }
+  if(campo==='cb_prezzo') st.prezzo=valNum(g('cb_prezzo'));
+  if(st.settore!==prima.set||st.cerca!==prima.cerca){ renderCbamCalc(); return; }
   aggiornaCalcolatore();
 }
+
 function aggiornaCalcolatore(){
   const st=window.CB_STATO;
-  const d=cbamDettaglio(st.origine,st.anno,st.verificati,st.prezzo);
-  const hero=document.getElementById('cb_hero');
+  const d=cbCalcolo(st);
+  const hero=document.getElementById('cb_hero'), kp=document.getElementById('cb_kpis');
+  const perc=document.getElementById('cb_percorso'), avv=document.getElementById('cb_avviso');
+  if(!hero) return;
   if(!d){
-    hero.innerHTML=`<div class="lab">Costo CBAM</div><div class="big">n.d.</div>
-      <div class="sub">Per ${esc(st.origine)} non è disponibile una base di emissioni verificate: il calcolo resta sui valori predefiniti.</div>`;
-    document.getElementById('cb_kpis').innerHTML="";
-  }else{
-    const cert=d.netto*st.ton;
-    document.getElementById('cb_kpis').innerHTML=
-      kpi('<span class="num">'+nf(d.eur_t)+'</span> €/t','Costo per tonnellata',esc(st.origine)+' · '+st.anno)
-     +kpi('<span class="num">'+nf(cert,1)+'</span>','Certificati da restituire','uno per tCO2e')
-     +kpi('<span class="num">€ '+num(Math.round(d.eur_t*st.ton))+'</span>','Costo su '+nf(st.ton,0)+' t','')
-     +kpi('<span class="num">'+nf(st.prezzo)+' €</span>','Prezzo certificato','');
-    hero.innerHTML=`
-      <div class="lab">Costo CBAM per tonnellata</div>
-      <div class="big num">${nf(d.eur_t)} <small>€/t</small></div>
-      <div class="sub">${esc(st.origine)} · ${st.anno} · base ${st.verificati?'emissioni verificate':'valore predefinito'}
-        ${d.ipotesi?' <span class="badge warn">ipotesi</span>':''}</div>
-      <div style="margin-top:12px">
-        <div class="calcrow"><div class="k">Emissioni specifiche
-          <small>${nf(d.base,3)} tCO2e/t${d.magg?` maggiorate del ${Math.round(d.magg*100)}%`:' senza maggiorazione'}</small></div>
-          <div class="v num">${nf(d.emiss,3)}</div></div>
-        <div class="calcrow"><div class="k">Deduzione per assegnazione gratuita
-          <small>benchmark colonna ${st.verificati?'A':'B'} ${nf(d.bm,3)} × fattore CBAM ${Math.round(d.fatt*1000)/10}%</small></div>
-          <div class="v num">− ${nf(d.detr,3)}</div></div>
-        <div class="calcrow"><div class="k">Emissioni nette
-          <small>mai negative: la deduzione azzera, non genera credito</small></div>
-          <div class="v num">${nf(d.netto,3)}</div></div>
-        <div class="calcrow tot"><div class="k">Costo per tonnellata
-          <small>${nf(d.netto,3)} × ${nf(st.prezzo)} €</small></div>
-          <div class="v num">${nf(d.eur_t)} €</div></div>
-      </div>`;
+    hero.innerHTML='<div class="lab">Costo CBAM</div><div class="big">n.d.</div>'+
+      '<div class="sub">Per questa combinazione di merce e paese il file ufficiale non riporta valori.</div>';
+    kp.innerHTML=""; perc.innerHTML=""; avv.innerHTML=""; return;
   }
-  graficoProiezione();
-  confrontoOrigini();
-  tabellaCbam();
-  // differenza fra i due scenari sui volumi inseriti
-  const pre=cbamDettaglio(st.origine,st.anno,false,st.prezzo);
-  const ver=cbamDettaglio(st.origine,st.anno,true,st.prezzo);
-  const nota=document.getElementById('cb_delta');
-  if(pre&&ver){
-    const diff=(pre.eur_t-ver.eur_t)*st.ton;
-    nota.innerHTML=`Su <b>${nf(st.ton,0)} t</b> di origine ${esc(st.origine)}: con i valori predefiniti
-      <b>€ ${num(Math.round(pre.eur_t*st.ton))}</b>, con dati di emissione verificati
-      <b>€ ${num(Math.round(ver.eur_t*st.ton))}</b>. Differenza <b>€ ${num(Math.round(diff))}</b>.
-      ${ver.ipotesi?' Il valore verificato è un\'ipotesi di lavoro finché la verifica non è formalizzata.':''}`;
-  }else{
-    nota.innerHTML=`Per ${esc(st.origine)} non esiste una base di emissioni verificate: il confronto fra i due scenari non è calcolabile.`;
+  // il percorso produttivo compare solo dove il benchmark ne prevede più d'uno
+  perc.innerHTML = d.percorsi.length>1
+    ? `<label class="fl">Percorso produttivo (benchmark)</label><select class="fi" id="cb_bench">
+        ${d.percorsi.map((p,i)=>`<option value="${i}"${i===st.bench?' selected':''}>${esc(p.r||('variante '+(i+1)))} — A ${nf(p.A,3)} / B ${nf(p.B,3)}</option>`).join("")}</select>` : "";
+  if(d.percorsi.length>1) document.getElementById('cb_bench').addEventListener('change',e=>{ st.bench=+e.target.value; aggiornaCalcolatore(); });
+
+  const pz=cbPrezzoTrim(st.anno,st.trim);
+  const hp=document.getElementById('cb_hintpz');
+  if(hp) hp.innerHTML = pz.noto
+    ? `Prezzo ETS medio del trimestre ${esc(st.anno+"-"+st.trim)}: <b>${nf(pz.valore)} €</b>. Modificabile per simulare altri scenari.`
+    : `Per ${esc(st.anno+"-"+st.trim)} il prezzo non è ancora pubblicato: in uso l'ultimo noto (${esc(pz.periodo)}, ${nf(pz.valore)} €). Il costo è quindi una stima.`;
+
+  kp.innerHTML=kpi('<span class="num">'+nf(d.eur_t)+'</span> €/t','Costo per tonnellata',esc(d.voce.c)+' · '+esc(st.paese))
+    +kpi('<span class="num">'+nf(d.quota,1)+'</span>','Quota CBAM (certificati)','uno per tCO2e')
+    +kpi('<span class="num">€ '+num(Math.round(d.costo))+'</span>','Costo su '+nf(st.ton,0)+' t','')
+    +kpi('<span class="num">'+nf(d.base,3)+'</span>','Emissioni di riferimento','tCO2/t '+(d.verif?'verificate':'predefinite'));
+
+  hero.innerHTML=`
+    <div class="lab">Costo CBAM per tonnellata</div>
+    <div class="big num">${nf(d.eur_t)} <small>€/t</small></div>
+    <div class="sub">${esc(d.voce.c)} · ${esc(st.paese)} · ${st.anno} ${esc(st.trim)} · tipo emissioni
+      ${d.verif?'VERIFICATE':'DEFAULT'}</div>
+    <div style="margin-top:12px">
+      <div class="calcrow"><div class="k">Emissioni specifiche (tCO2/t)
+        <small>${nf(d.base,3)}${d.magg?` maggiorate del ${Math.round(d.magg*1000)/10}%`:' senza maggiorazione'}${d.pubblicato?' · valore pubblicato in Gazzetta':''}</small></div>
+        <div class="v num">${nf(d.emiss,3)}</div></div>
+      <div class="calcrow"><div class="k">Benchmark (tCO2/t)
+        <small>colonna ${d.colonna}${d.verif?' - emissioni verificate':' - valori predefiniti'}</small></div>
+        <div class="v num">${nf(d.bm,3)}</div></div>
+      <div class="calcrow"><div class="k">CBAM factor<small>quota di assegnazione gratuita ancora riconosciuta</small></div>
+        <div class="v num">${nf(d.fatt*100,1)}%</div></div>
+      <div class="calcrow"><div class="k">CSCF<small>fattore di correzione intersettoriale</small></div>
+        <div class="v num">${nf(d.cscf,3)}</div></div>
+      <div class="calcrow"><div class="k">Prezzo ETS (€/t)<small>media del trimestre ${esc(st.anno+"-"+st.trim)}</small></div>
+        <div class="v num">${nf(st.prezzo)}</div></div>
+      <div class="calcrow"><div class="k">SEFA<small>benchmark × CBAM factor × CSCF</small></div>
+        <div class="v num">${nf(d.sefa,3)}</div></div>
+      <div class="calcrow"><div class="k">FAA<small>SEFA × quantità importata</small></div>
+        <div class="v num">${nf(d.faa,2)}</div></div>
+      <div class="calcrow"><div class="k">Emissioni dichiarate<small>emissioni specifiche × quantità</small></div>
+        <div class="v num">${nf(d.dich,2)}</div></div>
+      <div class="calcrow"><div class="k">Quota CBAM<small>emissioni dichiarate − FAA, mai negativa</small></div>
+        <div class="v num">${nf(d.quota,2)}</div></div>
+      <div class="calcrow tot"><div class="k">Costo CBAM<small>quota × prezzo ETS · su ${nf(st.ton,0)} t</small></div>
+        <div class="v num">€ ${num(Math.round(d.costo))}</div></div>
+    </div>`;
+
+  // avvisi: le situazioni che cambiano il conto senza che si veda dai numeri
+  let a="";
+  if(d.fonte==="ripiego") a=`<div class="avviso warn">Il file ufficiale elenca <b>${esc(st.paese)}</b> ma per questa merce
+    non pubblica un valore: si applicano i valori di <b>Altri paesi e territori</b> (nota all'allegato I).</div>`;
+  else if(d.fonte==="allegatoIV") a=`<div class="avviso warn">Valori dell'<b>allegato IV</b>: si usano quando l'origine
+    non è documentata in bolletta. Documentare l'origine riduce quasi sempre il costo.</div>`;
+  else if(d.fonte==="escluso") a=`<div class="avviso ok">Merce di origine UE o da paese dell'allegato III: nessun obbligo CBAM.</div>`;
+  if(!d.verif){
+    const ver=cbCalcolo(Object.assign({},st,{reali:d.base*0.5}));
+    if(ver) a+=`<div class="nota">Leva sulla verifica: con emissioni verificate pari alla metà del valore predefinito
+      il costo scenderebbe da <b>${nf(d.eur_t)} €/t</b> a <b>${nf(ver.eur_t)} €/t</b>
+      (su ${nf(st.ton,0)} t: <b>€ ${num(Math.round(d.costo-ver.costo))}</b>).
+      Inserisci il dato reale del fornitore nel campo «emissioni verificate» per il conto esatto.</div>`;
   }
+  avv.innerHTML=a;
+  graficoProiezione(); confrontoOrigini(); tabellaCbam();
 }
+
 // grafico a due serie, viewBox pari alla larghezza reale del contenitore
 function graficoProiezione(){
-  const box=document.getElementById('cb_graf'); if(!box) return;
-  const st=window.CB_STATO;
+  const box=document.getElementById('cb_graf'); if(!box||!CBV) return;
+  const st=window.CB_STATO; if(!st) return;
   const anni=anniCbam();
-  const serieA=anni.map(y=>{const d=cbamDettaglio(st.origine,+y,false,st.prezzo); return d?d.eur_t:0;});
-  const serieB=anni.map(y=>{const d=cbamDettaglio(st.origine,+y,true,st.prezzo); return d?d.eur_t:null;});
+  const serieA=anni.map(y=>{const d=cbCalcolo(Object.assign({},st,{anno:+y,reali:""})); return d?d.eur_t:0;});
+  const serieB=anni.map(y=>{
+    if(!st.reali) return null;
+    const d=cbCalcolo(Object.assign({},st,{anno:+y})); return d?d.eur_t:null;});
   const haB=serieB.some(v=>v!=null);
   const CW=Math.max(box.clientWidth||800,300);
   const narrow=CW<560;
@@ -1077,7 +1234,7 @@ function graficoProiezione(){
     ${anni.map((a,i)=>{
       if(narrow && i%2===1) return "";
       const anc=i===0?"start":(i===anni.length-1?"end":"middle");
-      return `<text x="${x(i)}" y="${H-10}" text-anchor="${anc}" font-size="10" fill="var(--mid)">${narrow?a.slice(2):a}</text>`;
+      return `<text x="${x(i)}" y="${H-10}" text-anchor="${anc}" font-size="10" fill="var(--mid)">${a}</text>`;
     }).join("")}
     ${linea(serieA,"var(--blue)")}
     ${haB?linea(serieB,"var(--serie2)"):""}
@@ -1085,54 +1242,85 @@ function graficoProiezione(){
     ${ultB!=null?`<text x="${W-mr}" y="${y(ultB)-8}" text-anchor="end" font-size="10" font-weight="700" fill="var(--serie2)">verificati</text>`:""}
   </svg>`;
 }
+
 function confrontoOrigini(){
-  const box=document.getElementById('cb_orig_cfr'); if(!box) return;
+  const box=document.getElementById('cb_orig_cfr'); if(!box||!CBV) return;
   const st=window.CB_STATO;
-  const righe=Object.keys((CBAM||{}).origini||{}).map(o=>{
-    const d=cbamDettaglio(o,st.anno,false,st.prezzo);
-    return {o,eur:d?d.eur_t:0};
-  }).sort((a,b)=>a.eur-b.eur);
-  const max=Math.max(1,...righe.map(r=>r.eur));
-  box.innerHTML=righe.map(r=>`<div class="bcfr ${r.o===st.origine?'sel':''}">
-      <div class="lb">${esc(r.o)}</div>
-      <div class="tr"><div class="fl" style="width:${Math.max(1,Math.round(100*r.eur/max))}%"></div></div>
-      <div class="vl num">${nf(r.eur,0)}</div>
-    </div>`).join("");
+  const righe=[];
+  Object.keys(CBV.paesi||{}).forEach(p=>{
+    const v=(CBV.paesi[p]||{})[st.cn];
+    if(v&&v[2]!=null){ const d=cbCalcolo(Object.assign({},st,{paese:p})); if(d) righe.push([p,d.eur_t]); }
+  });
+  [CB_ALTRI,CB_IV].forEach(s=>{ const d=cbCalcolo(Object.assign({},st,{paese:s})); if(d) righe.push([s,d.eur_t]); });
+  righe.sort((a,b)=>a[1]-b[1]);
+  const max=Math.max(1,...righe.map(r=>r[1]));
+  const fallback=righe.every(r=>r[0]!==st.paese);
+  box.innerHTML = righe.length
+    ? righe.map(([p,v])=>{
+        const sel = p===st.paese || (fallback && p===CB_ALTRI);
+        return `<div class="bcfr${sel?' sel':''}"><div class="lb">${esc(p)}</div>
+          <div class="tr"><div class="fl" style="width:${Math.max(2,v/max*100)}%"></div></div>
+          <div class="vl num">${nf(v,0)}</div></div>`;
+      }).join("")
+    : '<div class="nota">Nessun confronto disponibile per questa merce.</div>';
 }
+
 function tabellaCbam(){
-  const t=document.getElementById('cb_tabella'); if(!t) return;
-  const C=CBAM||{}; const st=window.CB_STATO;
-  const fonte=document.getElementById('cb_fonte');
+  const t=document.getElementById('cb_tabella'); if(!t||!CBV) return;
+  const st=window.CB_STATO; const fonte=document.getElementById('cb_fonte');
   if(CB_TAB==="valori"){
-    t.innerHTML=`<thead><tr><th>Origine</th><th class="n">tCO2e/t</th><th class="n">Maggiorato ${st.anno}</th><th class="n">€/t ghisa</th></tr></thead><tbody>`+
-      Object.entries(C.origini||{}).map(([o,v])=>{
-        const d=cbamDettaglio(o,st.anno,false,st.prezzo);
-        return {o,vp:v.valore_predefinito,em:d?d.emiss:0,eur:d?d.eur_t:0};
-      }).sort((a,b)=>a.eur-b.eur).map(r=>`<tr class="${r.o===st.origine?'sel':''}">
-        <td>${esc(r.o)}</td><td class="n num">${nf(r.vp,3)}</td>
-        <td class="n num">${nf(r.em,3)}</td><td class="n num">${nf(r.eur)}</td></tr>`).join("")+`</tbody>`;
-    fonte.innerHTML='Valori predefiniti dell\'allegato I del <b>Reg. esec. (UE) 2025/2621</b>, rettificato dal <b>Reg. 2026/1740</b>. Senza origine dimostrabile si applica il valore dell\'allegato IV.';
+    const righe=[];
+    Object.keys(CBV.paesi||{}).forEach(p=>{
+      const v=(CBV.paesi[p]||{})[st.cn];
+      if(v&&v[2]!=null){ const d=cbCalcolo(Object.assign({},st,{paese:p})); if(d) righe.push([p,v[2],d]); }
+    });
+    CB_SPECIALI.filter(s=>s!==CB_UE).forEach(s=>{
+      const d=cbCalcolo(Object.assign({},st,{paese:s})); if(d) righe.push([s,d.base,d]);
+    });
+    righe.sort((a,b)=>a[2].eur_t-b[2].eur_t);
+    t.innerHTML=`<thead><tr><th>Origine</th><th class="n">tCO2/t</th><th class="n">Maggiorato ${st.anno}</th>
+        <th class="n">Nette</th><th class="n">€/t</th></tr></thead><tbody>`+
+      righe.map(([p,v,d])=>`<tr class="${p===st.paese?'sel':''}"><td>${esc(p)}</td>
+        <td class="n num">${nf(v,3)}</td><td class="n num">${nf(d.emiss,3)}</td>
+        <td class="n num">${nf(d.netto,3)}</td><td class="n num">${nf(d.eur_t)}</td></tr>`).join("")+`</tbody>`;
+    fonte.innerHTML='Valori predefiniti dell\'allegato I del <b>Reg. esec. (UE) 2025/2621</b>, rettificato dal <b>Reg. 2026/1740</b>. I paesi non elencati per questa merce ricadono su «Altri paesi e territori»; senza origine documentata si applica l\'allegato IV.';
+  }else if(CB_TAB==="merci"){
+    const righe=CBV.voci.filter(v=>v.s===st.settore).map(v=>{
+      const d=cbCalcolo(Object.assign({},st,{cn:v.k,bench:0})); return d?[v,d]:null;
+    }).filter(Boolean).sort((a,b)=>b[1].eur_t-a[1].eur_t);
+    t.innerHTML=`<thead><tr><th>Codice NC</th><th>Merce</th><th class="n">tCO2/t</th>
+        <th class="n">Nette</th><th class="n">€/t</th></tr></thead><tbody>`+
+      righe.map(([v,d])=>`<tr class="${v.k===st.cn?'sel':''}"><td>${esc(v.c)}</td>
+        <td>${esc(v.d.slice(0,70))}${v.d.length>70?'…':''}</td>
+        <td class="n num">${nf(d.base,3)}</td><td class="n num">${nf(d.netto,3)}</td>
+        <td class="n num">${nf(d.eur_t)}</td></tr>`).join("")+`</tbody>`;
+    fonte.innerHTML=`Tutte le merci del settore <b>${esc(st.settore)}</b> per l'origine <b>${esc(st.paese)}</b>, all'anno e al prezzo impostati.`;
   }else if(CB_TAB==="benchmark"){
-    const b=C.benchmark||{}; const alt=C.altri_codici||{};
-    t.innerHTML=`<thead><tr><th>Codice NC</th><th>Descrizione</th><th class="n">Colonna A</th><th class="n">Colonna B</th></tr></thead><tbody>
-      <tr class="sel"><td>7201</td><td>ghisa in pani e specular</td><td class="n num">${nf(b.A,3)}</td><td class="n num">${nf(b.B,3)}</td></tr>`+
-      Object.entries(alt).map(([nc,v])=>`<tr><td>${esc(nc)}</td><td>${esc(v.descrizione||'')}</td>
-        <td class="n num">${v.benchmark_A!=null?nf(v.benchmark_A,3):'—'}</td>
-        <td class="n num">${v.benchmark_B!=null?nf(v.benchmark_B,3):'—'}</td></tr>`).join("")+`</tbody>`;
-    fonte.innerHTML='Colonna A con emissioni effettive verificate, colonna B con valori predefiniti. Il valore è <b>identico per tutte le sottovoci della 7201</b>, quindi la scelta fra 7201 10 90 e 7201 10 19 è economicamente neutra.';
+    const righe=CBV.voci.filter(v=>v.s===st.settore);
+    t.innerHTML=`<thead><tr><th>Codice NC</th><th>Descrizione</th><th class="n">Colonna A</th><th class="n">Colonna B</th></tr></thead><tbody>`+
+      righe.map(v=>{const b=((CBV.bench||{})[v.k]||[])[0]||{};
+        return `<tr class="${v.k===st.cn?'sel':''}"><td>${esc(v.c)}</td>
+          <td>${esc(v.d.slice(0,70))}${v.d.length>70?'…':''}</td>
+          <td class="n num">${b.A!=null?nf(b.A,3):'—'}</td>
+          <td class="n num">${b.B!=null?nf(b.B,3):'—'}</td></tr>`;}).join("")+`</tbody>`;
+    fonte.innerHTML='Colonna A con emissioni effettive verificate, colonna B con valori predefiniti: sono due metodi distinti, non due varianti dello stesso calcolo. Fonte: <b>Reg. esec. (UE) 2025/2620</b>.';
   }else if(CB_TAB==="fattori"){
     t.innerHTML=`<thead><tr><th>Anno</th><th class="n">Fattore CBAM</th><th class="n">Maggiorazione</th><th class="n">Deduzione col. B</th></tr></thead><tbody>`+
-      anniCbam().map(y=>`<tr class="${+y===st.anno?'sel':''}"><td>${y}</td>
-        <td class="n num">${nf((C.fattore||{})[y]*100,1)}%</td>
-        <td class="n num">+${nf((C.maggiorazione||{})[y]*100,0)}%</td>
-        <td class="n num">${nf((C.benchmark||{}).B*(C.fattore||{})[y],3)}</td></tr>`).join("")+`</tbody>`;
-    fonte.innerHTML='Il fattore CBAM è la quota di assegnazione gratuita ancora riconosciuta: <b>più scende, più cresce il costo</b>, a parità di emissioni e di prezzo. Il salto più brusco è fra 2029 e 2030.';
+      anniCbam().map(y=>{
+        const b=((CBV.bench||{})[st.cn]||[])[0]||{};
+        const f=(CBV.fattore||{})[y];
+        return `<tr class="${+y===st.anno?'sel':''}"><td>${y}</td>
+          <td class="n num">${nf(f*100,1)}%</td>
+          <td class="n num">+${nf(cbMaggiorazione(st.settore,+y)*100,0)}%</td>
+          <td class="n num">${b.B!=null?nf(b.B*f,3):'—'}</td></tr>`;}).join("")+`</tbody>`;
+    fonte.innerHTML='Il fattore CBAM è la quota di assegnazione gratuita ancora riconosciuta: <b>più scende, più cresce il costo</b>. Il salto più brusco è fra 2029 e 2030. La maggiorazione è <b>1% fisso per i concimi</b> e 10/20/30% per gli altri settori.';
   }else{
-    const sto=C.prezzo_certificato_storico||[];
-    t.innerHTML=`<thead><tr><th>Periodo</th><th class="n">Prezzo certificato</th></tr></thead><tbody>`+
-      sto.map(p=>`<tr><td>${esc(p.periodo)}</td><td class="n num">${nf(p.valore)} €</td></tr>`).join("")+
-      `<tr class="sel"><td>in uso</td><td class="n num">${nf(C.prezzo_certificato)} €</td></tr></tbody>`;
-    fonte.innerHTML=`Media ponderata delle aste EU ETS. Nel 2026 il prezzo è <b>trimestrale</b>, dal 2027 diventa <b>settimanale</b>: il momento dello sdoganamento entra nel costo.`;
+    const e=CBV.ets||{};
+    const per=Object.keys(e).sort();
+    t.innerHTML=`<thead><tr><th>Periodo</th><th class="n">Prezzo ETS medio</th></tr></thead><tbody>`+
+      per.map(p=>`<tr class="${p===(st.anno+"-"+st.trim)?'sel':''}"><td>${esc(p)}</td>
+        <td class="n num">${nf(e[p])} €</td></tr>`).join("")+`</tbody>`;
+    fonte.innerHTML=`Media dei prezzi EU ETS del trimestre. Nel 2026 il prezzo del certificato è <b>trimestrale</b>, dal 2027 diventa <b>settimanale</b>: il momento dello sdoganamento entra nel costo.`;
   }
 }
 
