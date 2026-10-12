@@ -22,6 +22,11 @@ DOCS_DIR="/documenti"; DOCS_INDEX="/documenti.json"
 CREDIT=[("Rating credito","rating",False),("Punteggio credito","punteggio",True),
         ("Limite credito report (€)","limite",True),("Proprietà","prop",False),
         ("Segnalazioni credito","segnalazioni",False),("Fatturato bilancio (€)","fatt_stim",True)]
+# Codici del gestionale che NON sono clienti: il loro saldo non è esposizione commerciale.
+FORNITORI_CONTABILI={"SDS020"}
+# Clienti che in contabilità hanno cambiato codice. Il CRM tiene il codice nuovo,
+# ma i documenti storici possono ancora riportare il vecchio.
+RICODIFICHE={"FVB010":"FVB005"}
 TOKEN_URL="https://api.dropbox.com/oauth2/token"
 DL="https://content.dropboxapi.com/2/files/download"
 UL="https://content.dropboxapi.com/2/files/upload"
@@ -869,6 +874,13 @@ def main():
             new_orders={}; clienti_report=set()
             for e in det:
                 espos,ordini=parse_dettaglio(dl(t,e["path_lower"]))
+                # Alcuni codici del gestionale non sono clienti o hanno un codice diverso
+                # da quello del CRM: senza questa mappa risultavano "esposizione orfana".
+                for vecchio,nuovo in RICODIFICHE.items():
+                    if vecchio in espos: espos[nuovo]=espos.pop(vecchio)
+                for f in FORNITORI_CONTABILI: espos.pop(f,None)
+                orfani=[c for c in espos if c not in rows]
+                if orfani: print("   ATTENZIONE: esposizione senza cliente in anagrafica:",", ".join(orfani))
                 for cod,v in espos.items(): addm(cod,"Esposizione corrente (€)",v,True)
                 new_orders.update(ordini)
                 clienti_report |= set(espos.keys()) | {o["cli"] for o in ordini.values() if o.get("cli")}
