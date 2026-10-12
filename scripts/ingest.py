@@ -520,14 +520,31 @@ def parse_dettaglio(pdf_bytes):
         except: pass
     cur=None; section=None; espos={}; ordini={}
     EPOCH=datetime.date(1899,12,30)
+    # Il codice cliente può contenere cifre anche nella parte iniziale (es. C2M040):
+    # con [A-Z]{2,4}\d{3} quei clienti non venivano riconosciuti e la loro esposizione
+    # finiva attribuita al cliente precedente.
+    RE_CLI=re.compile(r'Cliente\s+([A-Z][A-Z0-9]{1,3}\d{3})\s+')
     for ln in t.splitlines():
-        m=re.search(r'Cliente\s+([A-Z]{2,4}\d{3})\s+', ln)
+        m=RE_CLI.search(ln)
         if m: cur=m.group(1)
         if "Movimenti Contabili" in ln: section="contabili"
+        elif "Movimenti Fatture" in ln: section="fatture"
         elif "Movimenti Contratti-Ordini" in ln: section="ordini"
         elif "Movimenti Pre-Fatture" in ln: section="pre"
-        me=re.search(r'Totali senza Eff\.\s+([\d.,]+)', ln)
-        if me and cur: espos[cur]=money(me.group(1))
+        # L'esposizione del cliente è la somma di TRE totali: movimenti contabili
+        # ("Totali senza Eff."), fatture aperte ("Totali" con un solo importo) e
+        # pre-fatture ("Totali" con quantità e importo). Prendendo solo il primo
+        # l'esposizione risultava sottostimata di circa la metà.
+        # I movimenti Contratti-Ordini NON sono esposizione: sono portafoglio.
+        me=re.search(r'Totali senza Eff\.\s+([\d.,-]+)', ln)
+        if me and cur: espos[cur]=round((espos.get(cur) or 0)+(money(me.group(1)) or 0),2)
+        elif cur and section in ("fatture","pre"):
+            r=ln.rstrip()
+            # fatture: "Totali <EUR> [USD]" -> primo importo (l'USD è una colonna a parte).
+            # pre-fatture: "Totali <quantità> <EUR>" -> secondo numero.
+            mf=re.search(r'Totali\s+(-?[\d.,]+)', r) if section=="fatture" \
+               else re.search(r'Totali\s+[\d.,]+\s+(-?[\d.,]+)', r)
+            if mf: espos[cur]=round((espos.get(cur) or 0)+(money(mf.group(1)) or 0),2)
         if section=="ordini" and cur:
             mo=re.search(r'\b(\d{2}/G\d{3,4})\b', ln)
             if mo:
