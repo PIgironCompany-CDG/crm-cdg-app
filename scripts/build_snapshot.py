@@ -444,6 +444,21 @@ def main():
     xlsx = download(token, DB_PATH)
     print(f"Database scaricato ({len(xlsx)} byte). Costruisco lo snapshot...")
     snap = build(xlsx)
+    # Coordinate per la mappa: /geo.json (prodotto da tools/costruisci_geo.py).
+    # Si attaccano al cliente invece di viaggiare separate, così la mappa non
+    # deve fare una seconda chiamata e i filtri restano quelli dell'anagrafica.
+    try:
+        georaw = download_opt(token, "/geo.json")
+        punti = (json.loads(georaw).get("punti") or {}) if georaw else {}
+        n = 0
+        for c in snap.get("clienti", []):
+            p = punti.get(str(c.get("codice") or "").strip())
+            if p:
+                c["lat"], c["lon"], c["geo_prec"] = p["lat"], p["lon"], p.get("prec")
+                n += 1
+        print(f"GEO: {n} clienti posizionati su {len(snap.get('clienti', []))}")
+    except Exception as e:
+        print("Coordinate non caricate:", e)
     # Operativa CENTRALIZZATA: /operativa.json (prodotto da ingest.py dai file esposizione/magazzino).
     opraw = download_opt(token, OPERATIVA_PATH)
     try:
