@@ -591,7 +591,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "34";
+const APP_VERSION = "35";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -2494,20 +2494,23 @@ function closeDrawer(){document.getElementById('drawer').classList.remove('open'
 document.getElementById('ov').onclick=closeDrawer;
 
 // tabs principali
+// Mostra una sezione e nasconde tutte le altre.
+// L'elenco si ricava dalle sezioni presenti nel documento: enumerarle a mano
+// significava doversi ricordare di aggiungerne una a ogni tab nuovo, e infatti
+// la Mappa era rimasta fuori, quindi restava invisibile anche se selezionata.
+function mostraSezione(tab){
+  document.querySelectorAll('section[id^="tab-"]').forEach(s=>
+    s.classList.toggle('hidden', s.id !== 'tab-'+tab));
+}
 document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
+  const tab=b.dataset.tab;
   document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('on',x===b));
-  document.getElementById('tab-clienti').classList.toggle('hidden', b.dataset.tab!=='clienti');
-  document.getElementById('tab-fornitori').classList.toggle('hidden', b.dataset.tab!=='fornitori');
-  document.getElementById('tab-off').classList.toggle('hidden', b.dataset.tab!=='off');
-  document.getElementById('tab-cbam').classList.toggle('hidden', b.dataset.tab!=='cbam');
-  document.getElementById('tab-cal').classList.toggle('hidden', b.dataset.tab!=='cal');
-  document.getElementById('tab-inbox').classList.toggle('hidden', b.dataset.tab!=='inbox');
-  document.getElementById('tab-dash').classList.toggle('hidden', b.dataset.tab!=='dash');
-  assicuraSezione(b.dataset.tab);
-  if(b.dataset.tab==='dash') renderDash();
-  // Leaflet calcola le dimensioni al momento del disegno: se il contenitore era
-  // nascosto resta grigio finché non lo si avvisa che ora è visibile.
-  if(b.dataset.tab==='mappa' && typeof MAP!=="undefined" && MAP) setTimeout(()=>MAP.invalidateSize(),60);
+  mostraSezione(tab);
+  assicuraSezione(tab);          // disegnata ora che il contenitore è visibile
+  if(tab==='dash') renderDash();
+  // Leaflet misura il contenitore al momento del disegno: se era nascosto
+  // resta grigio finché non lo si avvisa che adesso ha una dimensione.
+  if(tab==='mappa' && typeof MAP!=="undefined" && MAP) setTimeout(()=>MAP.invalidateSize(),60);
 });
 // Sotto-tab della dashboard. Il selettore DEVE restare circoscritto a #tab-dash:
 // con '.dsub button' si prendevano anche i sotto-tab di CBAM e Inbox, sovrascrivendone
@@ -2544,8 +2547,7 @@ function goToClients(o){
   TIPO=o.tipo||''; PRESET=o.preset||null;
   const first=document.querySelector('#pstrip .pchip'); if(first) setActiveChip(first);
   document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('on',x.dataset.tab==='clienti'));
-  document.getElementById('tab-clienti').classList.remove('hidden');
-  document.getElementById('tab-dash').classList.add('hidden');
+  mostraSezione('clienti');
   render();
 }
 function renderMercato(){
