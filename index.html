@@ -132,6 +132,7 @@
   .hint{font-size:11px;color:var(--mid);margin:8px 0 0;text-align:center}
   .kpi .sub{font-size:11px;color:var(--mid);margin-top:5px}
   .dh3{margin:8px 16px 2px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;font-weight:700}
+  .dh4{margin:18px 16px 2px;font-size:13px;font-weight:700;color:var(--dark)}
   .dsubt{margin:0 16px 12px;font-size:12px;color:var(--mid)}
   .sectors{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
   .sector{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px}
@@ -433,8 +434,8 @@
         <option value="45">45 minuti</option><option value="60" selected>1 ora</option>
         <option value="90">1 ora e mezza</option><option value="120">2 ore</option></select></div>
       <div><label class="fl">Pausa pranzo</label><select class="fi" id="gg_pranzo">
-        <option value="0">nessuna</option><option value="45" selected>45 minuti</option>
-        <option value="60">1 ora</option></select></div>
+        <option value="0">nessuna</option><option value="45">45 minuti</option>
+        <option value="60" selected>1 ora</option></select></div>
       <div><label class="fl">Velocità media</label><select class="fi" id="gg_vel">
         <option value="55">55 km/h · molta città</option>
         <option value="65" selected>65 km/h · misto</option>
@@ -442,11 +443,16 @@
       <div><label class="fl">Zona attorno all'appuntamento</label><select class="fi" id="gg_zona">
         <option value="25">25 km</option><option value="45" selected>45 km</option>
         <option value="70">70 km</option><option value="100">100 km</option></select></div>
+      <div><label class="fl">Zona da battere</label><select class="fi" id="gg_area">
+        <option value="">la sceglie il sistema</option></select></div>
     </div>
     <div id="gg_esito"></div>
     <div class="tabwrap"><table class="tab-dati" id="gg_tappe"></table></div>
     <div class="mpaz" id="gg_azioni"></div>
-    <div class="tabwrap" id="gg_wrap_scarti" style="display:none"><table class="tab-dati" id="gg_scarti"></table></div>
+    <h4 class="dh4">Se avanza tempo</h4>
+    <p class="dsubt">Un'ora a visita è una stima ottimista. Se una va corta, qui c'è chi hai intorno
+      e quanto ti costerebbe aggiungerlo, senza rifare i conti.</p>
+    <div class="tabwrap" id="gg_wrap_scarti"><table class="tab-dati" id="gg_scarti"></table></div>
 
     <h3 class="dh3">Esplora lungo un percorso</h3>
     <p class="dsubt">Per il caso opposto: hai già in mente dove andare e vuoi sapere chi incontri per strada.</p>
@@ -598,7 +604,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "36";
+const APP_VERSION = "39";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -3046,7 +3052,12 @@ function renderMappa(){
       .map(a=>a.data).sort()[0];
     gd.value=prossimo||oggi;
   }
-  ['gg_data','gg_ora','gg_fine','gg_dur','gg_pranzo','gg_vel','gg_zona'].forEach(i=>{
+  const ga=document.getElementById('gg_area');
+  if(ga && ga.options.length<=1){
+    [...new Set(conCoord().map(c=>c.provincia).filter(Boolean))].sort()
+      .forEach(p=>ga.add(new Option("provincia di "+p,p)));
+  }
+  ['gg_data','gg_ora','gg_fine','gg_dur','gg_pranzo','gg_vel','gg_zona','gg_area'].forEach(i=>{
     const e=document.getElementById(i); if(e && !e._mp){ e._mp=1;
       e.addEventListener('change',renderGiornata); }
   });
@@ -3113,10 +3124,48 @@ function disegnaPunti(){
 // non a sostituire un navigatore. Il percorso reale si apre in Google Maps.
 const TORTUOSITA=1.3;          // le strade non sono rettilinee
 const TOLLERANZA=10;           // minuti di scarto ammessi su un orario fissato
+const APERTURA=9*60+30;        // in fonderia non ti ricevono prima delle 9:30
+const CHIUSURA=17*60;          // dopo le 17 non ha senso presentarsi
+// Quante visite stanno davvero in una giornata: vicino a casa si fa qualcosa in
+// più, in trasferta tre sono il realistico. Non è un limite tecnico ma l'esperienza
+// di chi le fa: raramente si sta dentro l'ora prevista.
+const TAPPE_VICINO=5, TAPPE_LONTANO=3, SOGLIA_TRASFERTA=90;  // minuti di viaggio
+const MATTINA=12*60;           // un appuntamento prima di mezzogiorno apre la giornata
 const PESO_STATO={"Contratto attivo":5,"Cliente caldo":4,"Cliente raffreddamento":3,
   "Da riprendere":3,"Prospect nuovo":2,"Cliente fermo":2,"Ex-cliente storico":1};
 
 function minuti(a,b,vel){ return Math.round(kmTra(a,b)*TORTUOSITA/vel*60); }
+
+// Sceglie la provincia da battere quando non ci sono appuntamenti a definirla.
+// Non la indovina con una formula: costruisce davvero la giornata per ogni
+// provincia a portata e tiene quella che vale di più. Costa una manciata di
+// millisecondi e toglie di mezzo le congetture — una formula che divide il
+// valore per il tempo di viaggio premia sempre il vicino, e il vicino non è
+// detto che valga la giornata.
+function scegliZona(st,cand){
+  const perProv={};
+  cand.forEach(c=>{ if(c.provincia) (perProv[c.provincia]=perProv[c.provincia]||[]).push(c); });
+  const papabili=Object.keys(perProv).map(p=>{
+      const lista=perProv[p];
+      const andata=Math.min(...lista.map(c=>minuti(SEDE,c,st.vel)));
+      const potenziale=lista.slice().sort((a,b)=>valoreCliente(b)-valoreCliente(a))
+                            .slice(0,6).reduce((s,c)=>s+valoreCliente(c),0);
+      return {p,n:lista.length,andata,stima:potenziale/(1+andata/90)};
+    })
+    .filter(x=>x.n>=2 &&                                // una sola fonderia non fa una zona
+      st.inizio+2*x.andata+2*st.durata+st.pranzo<=st.fine) // andata, ritorno, due visite, pausa
+    // La stima serve solo a scremare: si simulano per davvero le prime sei,
+    // perché simularle tutte costerebbe quasi due secondi a ogni modifica.
+    .sort((a,b)=>b.stima-a.stima).slice(0,6).map(x=>x.p);
+  let best=null;
+  for(const p of papabili){
+    const r=costruisciGiornata(Object.assign({},st,{area:p,senzaAuto:true,soloZona:true}));
+    if(r.errore||!r.tappe.length) continue;
+    const valore=r.tappe.reduce((s,t)=>s+valoreCliente(t),0);
+    if(!best||valore>best.valore) best={p,valore};
+  }
+  return best?best.p:"";
+}
 const hhmm=m=>String(Math.floor(m/60)).padStart(2,'0')+":"+String(Math.round(m%60)).padStart(2,'0');
 const daOra=s=>{const m=/^(\d{1,2}):(\d{2})$/.exec(String(s||"")); return m?(+m[1])*60+(+m[2]):null;};
 
@@ -3135,7 +3184,8 @@ function costruisciGiornata(st){
   let tappe=fissi.map(f=>Object.assign({},f,{fisso:true}));
 
   // verifica di fattibilità e calcolo degli orari di un itinerario
-  function orari(lista){
+  function orari(lista,ignoraFine,visitaAlt){
+    const vis=visitaAlt||visita;
     let t=st.inizio, pos=SEDE, out=[], pranzoFatto=(st.pranzo===0);
     for(const x of lista){
       t+=minuti(pos,x,vel);
@@ -3144,18 +3194,23 @@ function costruisciGiornata(st){
       // tre quarti d'ora.
       if(!pranzoFatto && t>=13*60){ t+=st.pranzo; pranzoFatto=true; }
       const ora=daOra(x.ora);
+      // Prima delle 9:30 in fonderia non ricevono, quindi non ha senso programmare
+      // una tappa prima. Un appuntamento che TU hai già preso fa eccezione: se è
+      // stato concordato a un altro orario, vale l'accordo.
+      if(ora==null && t<APERTURA) t=APERTURA;
+      if(ora==null && t>CHIUSURA) return null;   // dopo le 17 non si entra
       let tirato=false;
       if(ora!=null){
         if(ora>t) t=ora;                                    // si attende l'ora fissata
         else if(ora>=t-TOLLERANZA) { tirato=true; t=ora; }  // qualche minuto di ritardo: si segnala
         else return null;                                   // non ci si arriva proprio
       }
-      out.push(Object.assign({},x,{arrivo:t,partenza:t+visita,tirato}));
-      t+=visita; pos=x;
+      out.push(Object.assign({},x,{arrivo:t,partenza:t+vis,tirato}));
+      t+=vis; pos=x;
     }
     if(!pranzoFatto) t+=st.pranzo;
     const rientro=t+minuti(pos,SEDE,vel);
-    if(rientro>st.fine) return null;
+    if(rientro>st.fine && !ignoraFine) return null;
     return {tappe:out,rientro};
   }
 
@@ -3172,9 +3227,16 @@ function costruisciGiornata(st){
         msg=`Per essere da ${primo.ragione} alle ${primo.ora} serve partire entro le `+
             `${hhmm(Math.max(partire,0))}: sono circa ${viaggio} minuti da ${SEDE.nome.replace(/^Sede · /,'')}. `+
             `Con partenza alle ${hhmm(st.inizio)} non ci si arriva.`;
-      else
-        msg=`Il giro non rientra entro le ${hhmm(st.fine)}. Prova ad anticipare la partenza, `+
-            `ad accorciare le visite o a spostare un appuntamento.`;
+      else {
+        // La partenza non c'entra: con gli orari già fissati il problema è la coda
+        // della giornata. Meglio dire di quanto si sfora e cosa lo risolve davvero.
+        const prova=orari(tappe.map(x=>Object.assign({},x)),true);
+        const extra=prova?prova.rientro-st.fine:null;
+        msg=`Con questi appuntamenti il giro non rientra entro le ${hhmm(st.fine)}`+
+            (extra!=null?`: si sfora di circa ${extra} minuti`:"")+`. `+
+            `Gli orari già concordati bloccano la giornata, quindi partire prima non aiuta: `+
+            `puoi accorciare le visite, ridurre la pausa, spostare il rientro o rimandare un appuntamento.`;
+      }
     }
     return {errore:msg,tappe:tappe,scarti:[]};
   }
@@ -3189,16 +3251,36 @@ function costruisciGiornata(st){
   // Si considera "in zona" chi sta entro il raggio da un appuntamento fissato
   // oppure nella stessa provincia: i confini amministrativi contano, perché una
   // trasferta si racconta per zona, non per chilometri dalla rotta.
+  // Una giornata si lavora sempre a zona. Se non ci sono appuntamenti che la
+  // definiscano e non ne è stata scelta una a mano, la sceglie il sistema:
+  // girare a vuoto fra province diverse è il modo peggiore di spendere una giornata.
+  const areaScelta=fissi.length?"":(st.area||(st.senzaAuto?"":scegliZona(st,cand)));
   const prov=new Set(fissi.map(f=>f.provincia).filter(Boolean));
+  if(areaScelta) prov.add(areaScelta);
   const inZona=c=>fissi.some(f=>kmTra(f,c)<=st.zona) || (c.provincia && prov.has(c.provincia));
-  const zona=fissi.length?cand.filter(inZona):[];
+  const zona=cand.filter(inZona);
+
+  // Quante tappe hanno senso: vicino a casa qualcuna in più, in trasferta tre.
+  const andataZona=fissi.length?minuti(SEDE,fissi[0],vel)
+    :(zona.length?Math.min(...zona.map(c=>minuti(SEDE,c,vel))):0);
+  const maxTappe=st.max||(andataZona>SOGLIA_TRASFERTA?TAPPE_LONTANO:TAPPE_VICINO);
+
+  // Niente prima di un appuntamento del mattino. Se alle 11 sei atteso a Reggio,
+  // infilare una visita alle 9:30 da un'altra parte è il modo migliore per arrivare
+  // in ritardo all'unica tappa che conta davvero. Se invece l'appuntamento è nel
+  // pomeriggio la mattina è libera e va usata, altrimenti si parte da casa a mezzodì.
+  const primaPosizione=()=>{
+    const i=tappe.findIndex(x=>x.fisso && daOra(x.ora)!=null);
+    if(i<0) return 0;
+    return daOra(tappe[i].ora)<MATTINA ? i+1 : 0;
+  };
 
   // Inserisce il candidato scelto nella posizione che costa meno tempo.
   function inserisciMigliore(lista){
     let best=null;
     for(const c of lista){
       if(dentro.has(c.codice)) continue;
-      for(let i=0;i<=tappe.length;i++){
+      for(let i=primaPosizione();i<=tappe.length;i++){
         const prova=tappe.slice(); prova.splice(i,0,Object.assign({},c,{fisso:false}));
         const p=orari(prova);
         if(!p) continue;
@@ -3214,18 +3296,18 @@ function costruisciGiornata(st){
   // sei già sul posto; conta prendere i clienti che vale la pena vedere.
   const perValore=zona.slice().sort((a,b)=>valoreCliente(b)-valoreCliente(a));
   for(const c of perValore){
-    if(aggiunte>=st.max) break;
+    if(aggiunte+fissi.length>=maxTappe) break;
     const best=inserisciMigliore([c]);
     if(!best) continue;
     tappe=best.prova; piano=best.p; dentro.add(c.codice); zonaCodici.add(c.codice); aggiunte++;
   }
   // Seconda passata: il resto, col criterio del rendimento — valore per minuto in più.
   // È qui che entrano le tappe sulla via del ritorno, se avanza tempo.
-  while(aggiunte<st.max){
+  while(!st.soloZona && aggiunte+fissi.length<maxTappe){
     let best=null;
     for(const c of cand){
       if(dentro.has(c.codice)) continue;
-      for(let i=0;i<=tappe.length;i++){
+      for(let i=primaPosizione();i<=tappe.length;i++){
         const prova=tappe.slice(); prova.splice(i,0,Object.assign({},c,{fisso:false}));
         const p=orari(prova);
         if(!p) continue;
@@ -3237,16 +3319,40 @@ function costruisciGiornata(st){
     if(!best) break;
     tappe=best.prova; piano=best.p; dentro.add(best.c.codice); aggiunte++;
   }
-  // Chi è rimasto fuori: prima quelli della zona, che sono i veri rimpianti,
-  // poi gli altri per vicinanza alla sede.
-  cand.filter(c=>!dentro.has(c.codice))
-      .map(c=>({c,km:fissi.length?Math.min(...fissi.map(f=>kmTra(f,c))):kmTra(SEDE,c),zona:inZona(c)}))
-      .sort((a,b)=>(b.zona-a.zona)||(a.km-b.km)).slice(0,15)
+  // "Se avanza tempo": le fonderie che potresti aggiungere, con quanto costerebbero
+  // davvero. Serve perché un'ora a visita è una stima ottimista: se una va corta,
+  // vuoi sapere subito chi hai intorno senza rifare i conti.
+  cand.filter(c=>!dentro.has(c.codice)).map(c=>{
+      // Si valuta nello scenario che giustifica la domanda: le visite vanno più
+      // corte del previsto. Con un'ora piena non entrerebbe quasi mai nessuno,
+      // e la lista resterebbe vuota proprio quando serve.
+      const visitaCorta=Math.max(30,visita-15);
+      const rif=orari(tappe,true,visitaCorta);
+      let costo=null;
+      for(let i=primaPosizione();i<=tappe.length;i++){
+        const prova=tappe.slice(); prova.splice(i,0,Object.assign({},c,{fisso:false}));
+        const p=orari(prova,true,visitaCorta);   // si ignora il rientro: serve il costo, non la fattibilità
+        if(!p) continue;
+        const d=p.rientro-(rif?rif.rientro:piano.rientro);
+        if(costo==null||d<costo) costo=d;
+      }
+      // Se non è incastrabile nemmeno sforando, resta comunque utile sapere che
+      // c'è e quanto dista: magari salta un appuntamento e ci si sposta.
+      const km=tappe.length?Math.min(...tappe.map(t=>kmTra(t,c))):kmTra(SEDE,c);
+      return {c,costo,km,zona:inZona(c),
+              sforo:costo==null?null:Math.max(0,(rif?rif.rientro:piano.rientro)+costo-st.fine)};
+    }).filter(x=>x && x.km<=120)        // oltre non è più "lì vicino"
+      .sort((a,b)=>(b.zona-a.zona)||
+                   ((a.costo==null)-(b.costo==null))||
+                   ((a.costo!=null?a.costo:a.km*2)-(b.costo!=null?b.costo:b.km*2)))
+      .slice(0,10)
       .forEach(x=>scarti.push(x));
   const finali=piano.tappe.map(x=>Object.assign({},x,{zona:zonaCodici.has(x.codice)}));
   return {tappe:finali,rientro:piano.rientro,scarti,aggiunte,
           zonaTot:zona.length,inZonaMesse:zonaCodici.size,zonaKm:st.zona,
-          zonaNomi:[...new Set(fissi.map(f=>f.comune).filter(Boolean))]};
+          zonaNomi:fissi.length?[...new Set(fissi.map(f=>f.comune).filter(Boolean))]
+                                :(areaScelta?["provincia di "+areaScelta]:[]),
+          zonaAuto:!fissi.length && !st.area && !!areaScelta, areaScelta, maxTappe, andataZona};
 }
 
 function renderGiornata(){
@@ -3256,7 +3362,7 @@ function renderGiornata(){
         ts=document.getElementById('gg_scarti');
   if(!esito) return;
   const data=g('gg_data');
-  if(!data){ esito.innerHTML='<div class="nota">Scegli un giorno.</div>'; tab.innerHTML=''; az.innerHTML=''; ws.style.display='none'; return; }
+  if(!data){ esito.innerHTML='<div class="nota">Scegli un giorno.</div>'; tab.innerHTML=''; az.innerHTML=''; ts.innerHTML=''; return; }
   // tappe obbligate: appuntamenti e visite già a calendario per quel giorno
   const fissi=Object.values(ATT)
     .filter(a=>a.data===data && (a.tipo==='appuntamento'||a.tipo==='visita') && a.codice)
@@ -3264,24 +3370,26 @@ function renderGiornata(){
               return (c && typeof c.lat==="number") ? Object.assign({},c,{ora:a.ora||null,attId:a.id}) : null; })
     .filter(Boolean);
   const st={inizio:daOra(g('gg_ora'))??8*60, fine:daOra(g('gg_fine'))??19*60,
-            durata:parseInt(g('gg_dur')||"60",10), pranzo:parseInt(g('gg_pranzo')||"0",10),
+            durata:parseInt(g('gg_dur')||"60",10), pranzo:parseInt(g('gg_pranzo')||"60",10),
             vel:parseFloat(g('gg_vel')||"65"), zona:parseFloat(g('gg_zona')||"45"),
-            max:8, fissi};
+            area:g('gg_area')||"", max:8, fissi};
   const r=costruisciGiornata(st);
   GG_PIANO=r;
   if(r.errore){
     esito.innerHTML='<div class="avviso warn">'+esc(r.errore)+'</div>';
-    tab.innerHTML=''; az.innerHTML=''; ws.style.display='none'; return;
+    tab.innerHTML=''; az.innerHTML=''; ts.innerHTML=''; return;
   }
   const kmTot=(()=>{ let k=0,p=SEDE; r.tappe.forEach(x=>{k+=kmTra(p,x)*TORTUOSITA;p=x;}); return k+kmTra(p,SEDE)*TORTUOSITA; })();
   esito.innerHTML=`<div class="nota">
     <b>${r.tappe.length} tappe</b> · partenza ${esc(g('gg_ora'))} da ${esc(SEDE.nome)} ·
     rientro stimato <b>${hhmm(r.rientro)}</b> · circa <b>${nf(kmTot,0)} km</b>.
     ${fissi.length?`${fissi.length} ${fissi.length===1?'appuntamento già fissato':'appuntamenti già fissati'}, `:''}${r.aggiunte} aggiunte dal sistema.
-    ${r.zonaTot?`<br>Zona di <b>${esc((r.zonaNomi||[]).join(', '))}</b>: ${r.zonaTot} fonderie entro
+    ${r.zonaTot?`<br>Zona${r.zonaAuto?' scelta dal sistema':''} di <b>${esc((r.zonaNomi||[]).join(', '))}</b>: ${r.zonaTot} fonderie entro
       ${r.zonaKm} km o nella stessa provincia, <b>${r.inZonaMesse} inserite</b>${
       r.aggiunte>r.inZonaMesse?`; le altre ${r.aggiunte-r.inZonaMesse} sono sulla via del ritorno`:''}.`:''}
-    <br>I tempi sono stimati su distanza e velocità media, non su traffico reale.</div>`;
+    <br>Tetto di <b>${r.maxTappe} visite</b>${r.andataZona>90?' perché è una trasferta':' essendo zona vicina'},
+    nessuna prima delle 9:30 né dopo le 17:00.
+    I tempi sono stimati su distanza e velocità media, non su traffico reale.</div>`;
   tab.innerHTML=`<thead><tr><th class="n">Arrivo</th><th>Azienda</th><th>Dove</th><th>Stato</th>
       <th class="n">gg sil.</th><th>Perché</th></tr></thead><tbody>`+
     r.tappe.map(x=>`<tr class="${x.fisso?'sel':''}">
@@ -3293,12 +3401,12 @@ function renderGiornata(){
       <td>${esc(x.stato_calcolato||x.tipologia||"")}</td>
       <td class="n">${x.gg_silenzio||"—"}</td>
       <td>${x.fisso?'appuntamento in calendario'
-            :(x.zona?'<span class="badge ok">in zona</span> ':'<span class="badge neutro">rientro</span> ')+esc(motivoVisita(x))}</td></tr>`).join("")+
+            :(x.zona?'<span class="badge ok">in zona</span> '
+              :(r.zonaTot?'<span class="badge neutro">rientro</span> ':''))+esc(motivoVisita(x))}</td></tr>`).join("")+
     `<tr><td class="n">${hhmm(r.rientro)}</td><td colspan="5"><i>rientro in sede</i></td></tr></tbody>`;
   const nuove=r.tappe.filter(x=>!x.fisso);
   az.innerHTML=`<button class="primario" id="gg_gmaps">Apri il giro in Google Maps</button>
     <button id="gg_cal"${nuove.length?'':' disabled'}>Metti in calendario le ${nuove.length} tappe nuove</button>
-    <button id="gg_scartibtn">Mostra chi è rimasto fuori</button>
     <span class="who" id="gg_msg"></span>`;
   document.getElementById('gg_gmaps').onclick=()=>{
     const wp=r.tappe.map(x=>`${x.lat},${x.lon}`).join('|');
@@ -3307,18 +3415,19 @@ function renderGiornata(){
   };
   const cal=document.getElementById('gg_cal');
   if(cal) cal.onclick=()=>creaVisiteOrario(nuove,data);
-  document.getElementById('gg_scartibtn').onclick=()=>{
-    const apri=ws.style.display==='none';
-    ws.style.display=apri?'':'none';
-    if(apri) ts.innerHTML=`<thead><tr><th>Azienda</th><th>Dove</th><th>Stato</th><th class="n">km dalla tappa più vicina</th></tr></thead><tbody>`+
-      (r.scarti.length?r.scarti.map(({c,km,zona})=>`<tr>
-        <td><a href="#" onclick="openByCod('${c.codice}');return false;">${esc(c.ragione||"")}</a>
-          ${zona?' <span class="badge ok">in zona</span>':''}</td>
-        <td>${esc(c.comune||"")}${c.provincia?" ("+esc(c.provincia)+")":""}</td>
-        <td>${esc(c.stato_calcolato||c.tipologia||"")}</td>
-        <td class="n">${nf(km,0)}</td></tr>`).join("")
-      :'<tr><td colspan="4">Nessun altro candidato con i filtri attivi.</td></tr>')+`</tbody>`;
-  };
+  ts.innerHTML=`<thead><tr><th>Azienda</th><th>Dove</th><th>Stato</th>
+      <th class="n">km</th><th class="n">ti costa</th><th>Effetto</th></tr></thead><tbody>`+
+    (r.scarti.length?r.scarti.map(({c,km,costo,zona,sforo})=>`<tr>
+      <td><a href="#" onclick="openByCod('${c.codice}');return false;">${esc(c.ragione||"")}</a>
+        ${zona?' <span class="badge ok">in zona</span>':''}</td>
+      <td>${esc(c.comune||"")}${c.provincia?" ("+esc(c.provincia)+")":""}</td>
+      <td>${esc(c.stato_calcolato||c.tipologia||"")}</td>
+      <td class="n">${nf(km,0)}</td>
+      <td class="n">${costo==null?'—':'+'+costo+' min'}</td>
+      <td>${costo==null?'non incastrabile oggi'
+            :(costo<=5?'riempie un\'attesa fra due appuntamenti'
+            :(sforo?`rientro alle ${hhmm(r.rientro+costo)}`:'ci sta nella giornata'))}</td></tr>`).join("")
+    :'<tr><td colspan="6">Nessun\'altra fonderia raggiungibile con i filtri attivi.</td></tr>')+`</tbody>`;
   // la rotta del giorno disegnata sulla mappa
   if(MAP){
     if(MAP_ROTTA) MAP.removeLayer(MAP_ROTTA);
@@ -3361,7 +3470,7 @@ async function creaVisiteOrario(tappe,data){
 
 // Costanti e funzioni pure della mappa, esposte perché i test di regressione
 // possano verificarle: in uno script classico const e let non finiscono su window.
-Object.assign(window,{SEDE,TORTUOSITA,TOLLERANZA,PESO_STATO,COL_STATO,hhmm,daOra});
+Object.assign(window,{SEDE,TORTUOSITA,TOLLERANZA,APERTURA,CHIUSURA,MATTINA,TAPPE_VICINO,TAPPE_LONTANO,PESO_STATO,COL_STATO,hhmm,daOra});
 // Iniezione dei dati per i test: DATA e ATT sono binding lessicali, assegnarli
 // dall'esterno con window.DATA non li toccherebbe. In produzione non si usa.
 window.__setDati=(d,a)=>{ if(d) DATA=d; if(a) ATT=a; };
