@@ -358,10 +358,22 @@ def compatta(s):
     s=re.sub(r'\b(S\.?P\.?A\.?|S\.?R\.?L\.?|UNIPERSONALE|SOCIETA.?|PER AZIONI|& C\.?|SNC|SAS)\b','',str(s).upper())
     return re.sub(r'[^A-Z0-9]','',s)
 
+# Cartelle il cui nome non assomiglia abbastanza alla ragione sociale perché il
+# confronto automatico ci arrivi: sigle troppo corte (FVB, ZML), nomi invertiti
+# (PILENGA PIETRO contro "Fonderie Officine Pietro Pilenga") o con una parola in
+# mezzo ("Parola E Luraghi"). Meglio una mappa esplicita che un confronto più
+# permissivo, che aggancerebbe i clienti sbagliati.
+ALIAS_CARTELLE={
+    "PILENGAPIETRO":"PIL210", "PILENGABALDASSARRE":"PIL201",
+    "PAROLALURAGHI":"EXT003", "FVB":"FVB005", "ZML":"ZML360",
+    "TORBOLEGRUPPO":"TOR091", "SANTAGOSTINO":"PSP009", "PISANOSALERNO":"PIS040",
+}
+
 def cliente_da_cartella(nome, comp):
     """Il nome della cartella di caricamento è il miglior indizio sul cliente:
     'SABI' -> Fonderia Sa.Bi., 'FA GROUP' -> F.A. Group. Assegna solo se univoco."""
     n=compatta(nome)
+    if n in ALIAS_CARTELLE and ALIAS_CARTELLE[n] in comp: return ALIAS_CARTELLE[n]
     if len(n)<4: return None
     cand=[c for c,v in comp.items() if v and (v.startswith(n) or n.startswith(v) or n in v or v in n)]
     if not cand: return None
