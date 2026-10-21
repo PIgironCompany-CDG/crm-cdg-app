@@ -41,9 +41,18 @@
   #btnAgg{padding:6px 10px;font-size:15px;line-height:1}
   #aggTs{font-size:11px;opacity:.75;white-space:nowrap}
   @media(max-width:600px){#aggTs{display:none}}
-  nav.tabs{display:flex;gap:4px;background:#fff;border-bottom:1px solid var(--line);padding:0 12px;position:sticky;top:52px;z-index:4}
-  nav.tabs button{background:none;border:0;padding:12px 14px;font-size:14px;font-weight:600;color:var(--mid);border-bottom:2px solid transparent}
+  /* Con otto sezioni la barra non ci sta più su un telefono: scorre in orizzontale
+     invece di andare a capo o comprimere le voci fino a renderle illeggibili. */
+  nav.tabs{display:flex;gap:4px;background:#fff;border-bottom:1px solid var(--line);padding:0 12px;position:sticky;top:52px;z-index:4;
+    overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  nav.tabs::-webkit-scrollbar{display:none}
+  nav.tabs button{background:none;border:0;padding:12px 14px;font-size:14px;font-weight:600;color:var(--mid);border-bottom:2px solid transparent;
+    white-space:nowrap;flex:0 0 auto}
   nav.tabs button.on{color:var(--dark);border-bottom-color:var(--dark)}
+  @media(max-width:700px){
+    nav.tabs{padding:0 8px}
+    nav.tabs button{padding:11px 10px;font-size:13px}
+  }
 
   .bar{padding:12px 16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#fff;border-bottom:1px solid var(--line)}
   .bar input,.bar select{padding:9px 11px;border:1px solid var(--line);border-radius:9px;font-size:15px}
@@ -213,12 +222,26 @@
   #tab-mappa .tab-dati thead th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mid);background:var(--light)}
   #tab-mappa .tab-dati td.n,#tab-mappa .tab-dati th.n{text-align:right;white-space:nowrap}
   #tab-mappa .nota,#tab-mappa .avviso{margin:10px 16px 0;font-size:13px}
+  #tab-mappa .tabwrap{-webkit-overflow-scrolling:touch}
+  /* iPad e tablet: la mappa può prendersi più altezza, i parametri stanno in due colonne */
+  @media(min-width:641px) and (max-width:1024px){
+    #mappa{height:min(50vh,460px)}
+    #tab-mappa .mpplan{grid-template-columns:repeat(2,1fr)}
+  }
   @media(max-width:640px){
     #mappa{height:52vh;min-height:260px;margin:0 10px;border-radius:10px}
     #tab-mappa .mpbar{padding:8px 10px}
+    #tab-mappa .mpbar input[type=search],#tab-mappa .mpbar select{font-size:16px} /* sotto i 16px iOS zooma da solo */
     #tab-mappa .mpplan,#tab-mappa .mpaz{padding-left:10px;padding-right:10px}
+    #tab-mappa .mpplan{grid-template-columns:1fr 1fr;gap:8px}
     #tab-mappa .tabwrap{margin-left:10px;margin-right:10px}
     #tab-mappa .mpaz button{flex:1 1 100%}
+    #tab-mappa .fi{font-size:16px}
+    /* In verticale servono le colonne che decidono: orario, chi, perché.
+       Dove e giorni di silenzio restano nella scheda cliente, a un tocco. */
+    #tab-mappa #gg_tappe th:nth-child(3),#tab-mappa #gg_tappe td:nth-child(3),
+    #tab-mappa #gg_tappe th:nth-child(5),#tab-mappa #gg_tappe td:nth-child(5){display:none}
+    #tab-mappa .mplegend{gap:8px;font-size:11px}
   }
   @media(max-width:760px){#tab-cbam .scen{grid-template-columns:1fr}}
   @media(max-width:520px){#tab-cbam .bcfr{grid-template-columns:minmax(84px,110px) 1fr 46px;gap:7px}}
@@ -395,8 +418,31 @@
       <span class="mphint">Il contorno tratteggiato segnala un punto sul centro del comune, non sull'indirizzo.</span>
     </div>
 
-    <h3 class="dh3">Pianifica una missione</h3>
-    <p class="dsubt">Scegli dove vai: ti mostra chi incontri lungo la strada, con stato e ultima azione.</p>
+    <h3 class="dh3">Giornata di visite</h3>
+    <p class="dsubt">Scegli il giorno: prende gli appuntamenti già fissati, li tiene come tappe obbligate
+      e riempie il resto della giornata con le fonderie più vicine, garantendo il rientro ad Arese.</p>
+    <div class="mpplan">
+      <div><label class="fl">Giorno</label><input class="fi" id="gg_data" type="date"></div>
+      <div><label class="fl">Partenza</label><input class="fi" id="gg_ora" type="time" value="08:00"></div>
+      <div><label class="fl">Rientro entro</label><input class="fi" id="gg_fine" type="time" value="19:00"></div>
+      <div><label class="fl">Durata visita</label><select class="fi" id="gg_dur">
+        <option value="45">45 minuti</option><option value="60" selected>1 ora</option>
+        <option value="90">1 ora e mezza</option><option value="120">2 ore</option></select></div>
+      <div><label class="fl">Pausa pranzo</label><select class="fi" id="gg_pranzo">
+        <option value="0">nessuna</option><option value="45" selected>45 minuti</option>
+        <option value="60">1 ora</option></select></div>
+      <div><label class="fl">Velocità media</label><select class="fi" id="gg_vel">
+        <option value="55">55 km/h · molta città</option>
+        <option value="65" selected>65 km/h · misto</option>
+        <option value="80">80 km/h · molta autostrada</option></select></div>
+    </div>
+    <div id="gg_esito"></div>
+    <div class="tabwrap"><table class="tab-dati" id="gg_tappe"></table></div>
+    <div class="mpaz" id="gg_azioni"></div>
+    <div class="tabwrap" id="gg_wrap_scarti" style="display:none"><table class="tab-dati" id="gg_scarti"></table></div>
+
+    <h3 class="dh3">Esplora lungo un percorso</h3>
+    <p class="dsubt">Per il caso opposto: hai già in mente dove andare e vuoi sapere chi incontri per strada.</p>
     <div class="mpplan">
       <div><label class="fl">Partenza</label><select class="fi" id="mp_da"></select></div>
       <div><label class="fl">Destinazione</label><select class="fi" id="mp_a"></select></div>
@@ -545,7 +591,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "33";
+const APP_VERSION = "34";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -2911,8 +2957,9 @@ document.addEventListener('visibilitychange',()=>{
 // Le coordinate arrivano dallo snapshot (campi lat/lon/geo_prec, da geo.json).
 // La navigazione vera la delega a Google Maps con un link: funziona su tutti i
 // telefoni e non richiede chiavi.
-const SEDE={nome:"UNICOAL · Milano, Via Gioberti 5",lat:45.4755,lon:9.1712};
+const SEDE={nome:"Sede · Arese, Via Gramsci 53",lat:45.5514,lon:9.0850};
 let MAP=null, MAP_LAYER=null, MAP_ROTTA=null, MP_SEL=new Set();
+let GG_PIANO=null;   // ultimo itinerario calcolato per la giornata
 
 const COL_STATO={"Cliente caldo":"#c2571f","Contratto attivo":"#1f7a45","Cliente raffreddamento":"#2b7fb8",
   "Cliente fermo":"#8a8f96","Ex-cliente storico":"#5c6672","Prospect nuovo":"#7b4fa8","Cliente attivo":"#1f7a45"};
@@ -2981,6 +3028,20 @@ function renderMappa(){
     const e=document.getElementById(i); if(e && !e._mp){ e._mp=1;
       e.addEventListener('change',()=>{ MP_SEL.clear(); pianificaMissione(); }); }
   });
+  // giornata di visite: si apre sul primo giorno con appuntamenti, altrimenti oggi
+  const gd=document.getElementById('gg_data');
+  if(gd && !gd.value){
+    const oggi=new Date().toISOString().slice(0,10);
+    const prossimo=Object.values(ATT)
+      .filter(a=>(a.tipo==='appuntamento'||a.tipo==='visita') && a.data>=oggi && a.codice)
+      .map(a=>a.data).sort()[0];
+    gd.value=prossimo||oggi;
+  }
+  ['gg_data','gg_ora','gg_fine','gg_dur','gg_pranzo','gg_vel'].forEach(i=>{
+    const e=document.getElementById(i); if(e && !e._mp){ e._mp=1;
+      e.addEventListener('change',renderGiornata); }
+  });
+  renderGiornata();
   disegnaPunti();
   setTimeout(()=>MAP.invalidateSize(),60);   // il contenitore era nascosto al primo disegno
 }
@@ -3034,6 +3095,220 @@ function disegnaPunti(){
     MAP._adattata=true;
   }
 }
+
+// ---------- GIORNATA DI VISITE ----------
+// Parte dagli appuntamenti già a calendario e ci costruisce intorno la giornata,
+// riempiendo i buchi con le fonderie raggiungibili e garantendo il rientro in sede.
+// I tempi di percorrenza sono stimati (distanza in linea d'aria × fattore di
+// tortuosità ÷ velocità media): servono a decidere quante tappe stanno in piedi,
+// non a sostituire un navigatore. Il percorso reale si apre in Google Maps.
+const TORTUOSITA=1.3;          // le strade non sono rettilinee
+const TOLLERANZA=10;           // minuti di scarto ammessi su un orario fissato
+const PESO_STATO={"Contratto attivo":5,"Cliente caldo":4,"Cliente raffreddamento":3,
+  "Da riprendere":3,"Prospect nuovo":2,"Cliente fermo":2,"Ex-cliente storico":1};
+
+function minuti(a,b,vel){ return Math.round(kmTra(a,b)*TORTUOSITA/vel*60); }
+const hhmm=m=>String(Math.floor(m/60)).padStart(2,'0')+":"+String(Math.round(m%60)).padStart(2,'0');
+const daOra=s=>{const m=/^(\d{1,2}):(\d{2})$/.exec(String(s||"")); return m?(+m[1])*60+(+m[2]):null;};
+
+function valoreCliente(c){
+  const base=PESO_STATO[c.stato_calcolato]||PESO_STATO[c.tipologia]||1;
+  const sil=Math.min(Number(c.gg_silenzio)||0,180)/180;   // più tace, più vale passare
+  return base+sil*2;
+}
+
+// Costruisce l'itinerario. Le tappe fisse (appuntamenti già presi) restano nell'ordine
+// dei loro orari; le aggiunte vengono inserite dove costano meno tempo, finché la
+// giornata regge. Restituisce anche gli scarti, con il motivo.
+function costruisciGiornata(st){
+  const vel=st.vel, visita=st.durata;
+  const fissi=st.fissi.slice().sort((a,b)=>(daOra(a.ora)??1e9)-(daOra(b.ora)??1e9));
+  let tappe=fissi.map(f=>Object.assign({},f,{fisso:true}));
+
+  // verifica di fattibilità e calcolo degli orari di un itinerario
+  function orari(lista){
+    let t=st.inizio, pos=SEDE, out=[], pranzoFatto=(st.pranzo===0);
+    for(const x of lista){
+      t+=minuti(pos,x,vel);
+      // La pausa pranzo si fa in viaggio, PRIMA di arrivare: sommarla dopo il
+      // controllo dell'orario faceva risultare puntuali appuntamenti mancati di
+      // tre quarti d'ora.
+      if(!pranzoFatto && t>=13*60){ t+=st.pranzo; pranzoFatto=true; }
+      const ora=daOra(x.ora);
+      let tirato=false;
+      if(ora!=null){
+        if(ora>t) t=ora;                                    // si attende l'ora fissata
+        else if(ora>=t-TOLLERANZA) { tirato=true; t=ora; }  // qualche minuto di ritardo: si segnala
+        else return null;                                   // non ci si arriva proprio
+      }
+      out.push(Object.assign({},x,{arrivo:t,partenza:t+visita,tirato}));
+      t+=visita; pos=x;
+    }
+    if(!pranzoFatto) t+=st.pranzo;
+    const rientro=t+minuti(pos,SEDE,vel);
+    if(rientro>st.fine) return null;
+    return {tappe:out,rientro};
+  }
+
+  let piano=orari(tappe);
+  if(!piano){
+    // Non basta dire che non ci sta: serve sapere a che ora si dovrebbe partire,
+    // perché quasi sempre il problema è il primo appuntamento troppo presto.
+    let msg="Gli appuntamenti già fissati non stanno dentro la giornata impostata.";
+    const primo=tappe.find(x=>daOra(x.ora)!=null);
+    if(primo){
+      const viaggio=minuti(SEDE,primo,vel);
+      const partire=daOra(primo.ora)-viaggio;
+      if(partire<st.inizio)
+        msg=`Per essere da ${primo.ragione} alle ${primo.ora} serve partire entro le `+
+            `${hhmm(Math.max(partire,0))}: sono circa ${viaggio} minuti da ${SEDE.nome.replace(/^Sede · /,'')}. `+
+            `Con partenza alle ${hhmm(st.inizio)} non ci si arriva.`;
+      else
+        msg=`Il giro non rientra entro le ${hhmm(st.fine)}. Prova ad anticipare la partenza, `+
+            `ad accorciare le visite o a spostare un appuntamento.`;
+    }
+    return {errore:msg,tappe:tappe,scarti:[]};
+  }
+
+  // candidate: fonderie posizionate, non già in programma
+  const dentro=new Set(tappe.map(x=>x.codice));
+  const cand=filtroMappa().filter(c=>!dentro.has(c.codice));
+  const scarti=[];
+  let aggiunte=0;
+  while(aggiunte<st.max){
+    let best=null;
+    for(const c of cand){
+      if(dentro.has(c.codice)) continue;
+      for(let i=0;i<=tappe.length;i++){
+        const prova=tappe.slice(); prova.splice(i,0,Object.assign({},c,{fisso:false}));
+        const p=orari(prova);
+        if(!p) continue;
+        const costo=p.rientro-piano.rientro;                 // minuti in più sulla giornata
+        const punteggio=valoreCliente(c)/Math.max(costo,5);  // valore per minuto speso
+        if(!best||punteggio>best.punteggio) best={c,i,p,costo,punteggio,prova};
+      }
+    }
+    if(!best) break;
+    tappe=best.prova; piano=best.p; dentro.add(best.c.codice); aggiunte++;
+  }
+  // chi è rimasto fuori, ordinato per vicinanza alla sede: è la lista "da valutare"
+  cand.filter(c=>!dentro.has(c.codice))
+      .map(c=>({c,km:kmTra(SEDE,c)}))
+      .sort((a,b)=>a.km-b.km).slice(0,15)
+      .forEach(x=>scarti.push(x));
+  return {tappe:piano.tappe,rientro:piano.rientro,scarti,aggiunte};
+}
+
+function renderGiornata(){
+  const g=i=>{const e=document.getElementById(i); return e?e.value:"";};
+  const esito=document.getElementById('gg_esito'), tab=document.getElementById('gg_tappe'),
+        az=document.getElementById('gg_azioni'), ws=document.getElementById('gg_wrap_scarti'),
+        ts=document.getElementById('gg_scarti');
+  if(!esito) return;
+  const data=g('gg_data');
+  if(!data){ esito.innerHTML='<div class="nota">Scegli un giorno.</div>'; tab.innerHTML=''; az.innerHTML=''; ws.style.display='none'; return; }
+  // tappe obbligate: appuntamenti e visite già a calendario per quel giorno
+  const fissi=Object.values(ATT)
+    .filter(a=>a.data===data && (a.tipo==='appuntamento'||a.tipo==='visita') && a.codice)
+    .map(a=>{ const c=DATA.find(x=>x.codice===a.codice);
+              return (c && typeof c.lat==="number") ? Object.assign({},c,{ora:a.ora||null,attId:a.id}) : null; })
+    .filter(Boolean);
+  const st={inizio:daOra(g('gg_ora'))??8*60, fine:daOra(g('gg_fine'))??19*60,
+            durata:parseInt(g('gg_dur')||"60",10), pranzo:parseInt(g('gg_pranzo')||"0",10),
+            vel:parseFloat(g('gg_vel')||"65"), max:8, fissi};
+  const r=costruisciGiornata(st);
+  GG_PIANO=r;
+  if(r.errore){
+    esito.innerHTML='<div class="avviso warn">'+esc(r.errore)+'</div>';
+    tab.innerHTML=''; az.innerHTML=''; ws.style.display='none'; return;
+  }
+  const kmTot=(()=>{ let k=0,p=SEDE; r.tappe.forEach(x=>{k+=kmTra(p,x)*TORTUOSITA;p=x;}); return k+kmTra(p,SEDE)*TORTUOSITA; })();
+  esito.innerHTML=`<div class="nota">
+    <b>${r.tappe.length} tappe</b> · partenza ${esc(g('gg_ora'))} da ${esc(SEDE.nome)} ·
+    rientro stimato <b>${hhmm(r.rientro)}</b> · circa <b>${nf(kmTot,0)} km</b>.
+    ${fissi.length?`${fissi.length} ${fissi.length===1?'appuntamento già fissato':'appuntamenti già fissati'}, `:''}${r.aggiunte} aggiunte dal sistema.
+    I tempi sono stimati su distanza e velocità media, non su traffico reale.</div>`;
+  tab.innerHTML=`<thead><tr><th class="n">Arrivo</th><th>Azienda</th><th>Dove</th><th>Stato</th>
+      <th class="n">gg sil.</th><th>Perché</th></tr></thead><tbody>`+
+    r.tappe.map(x=>`<tr class="${x.fisso?'sel':''}">
+      <td class="n">${hhmm(x.arrivo)}</td>
+      <td><a href="#" onclick="openByCod('${x.codice}');return false;">${esc(x.ragione||"")}</a>
+        ${x.fisso?' <span class="badge">fissato</span>':''}${x.tirato?' <span class="badge warn">tirata</span>':''}
+        ${x.geo_prec==="comune"?' <span class="badge warn">posizione approssimata</span>':''}</td>
+      <td>${esc(x.comune||"")}${x.provincia?" ("+esc(x.provincia)+")":""}</td>
+      <td>${esc(x.stato_calcolato||x.tipologia||"")}</td>
+      <td class="n">${x.gg_silenzio||"—"}</td>
+      <td>${x.fisso?'appuntamento in calendario':esc(motivoVisita(x))}</td></tr>`).join("")+
+    `<tr><td class="n">${hhmm(r.rientro)}</td><td colspan="5"><i>rientro in sede</i></td></tr></tbody>`;
+  const nuove=r.tappe.filter(x=>!x.fisso);
+  az.innerHTML=`<button class="primario" id="gg_gmaps">Apri il giro in Google Maps</button>
+    <button id="gg_cal"${nuove.length?'':' disabled'}>Metti in calendario le ${nuove.length} tappe nuove</button>
+    <button id="gg_scartibtn">Mostra chi è rimasto fuori</button>
+    <span class="who" id="gg_msg"></span>`;
+  document.getElementById('gg_gmaps').onclick=()=>{
+    const wp=r.tappe.map(x=>`${x.lat},${x.lon}`).join('|');
+    window.open(`https://www.google.com/maps/dir/?api=1&origin=${SEDE.lat},${SEDE.lon}`+
+      `&destination=${SEDE.lat},${SEDE.lon}&waypoints=${encodeURIComponent(wp)}&travelmode=driving`,'_blank','noopener');
+  };
+  const cal=document.getElementById('gg_cal');
+  if(cal) cal.onclick=()=>creaVisiteOrario(nuove,data);
+  document.getElementById('gg_scartibtn').onclick=()=>{
+    const apri=ws.style.display==='none';
+    ws.style.display=apri?'':'none';
+    if(apri) ts.innerHTML=`<thead><tr><th>Azienda</th><th>Dove</th><th>Stato</th><th class="n">km dalla sede</th></tr></thead><tbody>`+
+      (r.scarti.length?r.scarti.map(({c,km})=>`<tr>
+        <td><a href="#" onclick="openByCod('${c.codice}');return false;">${esc(c.ragione||"")}</a></td>
+        <td>${esc(c.comune||"")}${c.provincia?" ("+esc(c.provincia)+")":""}</td>
+        <td>${esc(c.stato_calcolato||c.tipologia||"")}</td>
+        <td class="n">${nf(km,0)}</td></tr>`).join("")
+      :'<tr><td colspan="4">Nessun altro candidato con i filtri attivi.</td></tr>')+`</tbody>`;
+  };
+  // la rotta del giorno disegnata sulla mappa
+  if(MAP){
+    if(MAP_ROTTA) MAP.removeLayer(MAP_ROTTA);
+    MAP_ROTTA=L.polyline([[SEDE.lat,SEDE.lon],...r.tappe.map(x=>[x.lat,x.lon]),[SEDE.lat,SEDE.lon]],
+      {color:"#1f7a45",weight:3,opacity:.8}).addTo(MAP);
+  }
+}
+
+function motivoVisita(c){
+  const p=[];
+  if(c.contratti_aperti>0) p.push("contratto aperto");
+  if(c.stato_calcolato==='Cliente caldo') p.push("offerta recente");
+  if((Number(c.gg_silenzio)||0)>=90) p.push(c.gg_silenzio+" gg senza contatti");
+  else if((Number(c.gg_silenzio)||0)>=30) p.push("silenzio da "+c.gg_silenzio+" gg");
+  if(c.esposizione_corrente>0) p.push("esposizione aperta");
+  return p.length?p.join(", "):"vicina al percorso";
+}
+
+// Mette a calendario le tappe con l'orario calcolato, saltando chi c'è già.
+async function creaVisiteOrario(tappe,data){
+  const msg=document.getElementById('gg_msg');
+  msg.textContent="Creazione in corso…";
+  let fatte=0,saltate=0;
+  for(const c of tappe){
+    const gia=Object.values(ATT).some(x=>x.codice===c.codice && x.data===data &&
+      (x.tipo==='visita'||x.tipo==='appuntamento'));
+    if(gia){ saltate++; continue; }
+    const {ok,j}=await apiPost('/attivita',{id:null,fields:{
+      tipo:"visita", codice:c.codice, cliente:c.ragione||"",
+      titolo:"Visita · giro del "+data, data, ora:hhmm(c.arrivo),
+      durata_min:parseInt(document.getElementById('gg_dur').value||"60",10),
+      owner:USER, luogo:[c.comune,c.provincia].filter(Boolean).join(" ("),
+      note:"Tappa del giro pianificato dalla mappa. "+motivoVisita(c)}});
+    if(ok&&j.attivita){ ATT[j.attivita.id]=j.attivita; fatte++; }
+  }
+  msg.textContent=`${fatte} visite create${saltate?`, ${saltate} già presenti`:''}.`;
+  await dopoModifica('cal');
+  renderGiornata();
+}
+
+// Costanti e funzioni pure della mappa, esposte perché i test di regressione
+// possano verificarle: in uno script classico const e let non finiscono su window.
+Object.assign(window,{SEDE,TORTUOSITA,TOLLERANZA,PESO_STATO,COL_STATO,hhmm,daOra});
+// Iniezione dei dati per i test: DATA e ATT sono binding lessicali, assegnarli
+// dall'esterno con window.DATA non li toccherebbe. In produzione non si usa.
+window.__setDati=(d,a)=>{ if(d) DATA=d; if(a) ATT=a; };
 
 function puntoDa(valore){
   if(valore==="__sede__") return {codice:null,ragione:SEDE.nome,lat:SEDE.lat,lon:SEDE.lon};
