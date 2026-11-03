@@ -996,10 +996,6 @@ function openDrawer(c){
           <div><label class="fl">P.IVA</label><input class="fi ro" id="ed_piva" value="${escAttr(c.piva)}" disabled></div>
           <div><label class="fl">Settore</label><input class="fi ro" id="ed_settore" value="${escAttr(c.settore)}" disabled></div>
           <div><label class="fl">Proprietà</label><input class="fi ro" id="ed_proprieta" value="${escAttr(c.proprieta)}" disabled></div>
-          <div><label class="fl">Venditore</label><select class="fi" id="ed_owner">
-            <option value="">— da assegnare —</option>
-            ${VENDITORI.map(v=>`<option${venditoreDi(c)===v?' selected':''}>${esc(v)}</option>`).join("")}
-          </select></div>
           <div><label class="fl">Comune</label><input class="fi ro" id="ed_comune" value="${escAttr(c.comune)}" disabled></div>
           <div><label class="fl">Provincia</label><input class="fi ro" id="ed_provincia" value="${escAttr(c.provincia)}" disabled></div>
         </div>
@@ -1032,10 +1028,14 @@ function openDrawer(c){
             : '';})()}
       </div>
       <div class="cgrid2">
+        <div><label class="fl">Venditore</label><select class="fi" id="ed_owner">
+          <option value=""${venditoreDi(c)?'':' selected'}>— da assegnare —</option>
+          ${VENDITORI.map(v=>`<option${venditoreDi(c)===v?' selected':''}>${esc(v)}</option>`).join("")}
+        </select></div>
         <div>${sel("priorita","Priorità",c.priorita,["Alta","Media","Bassa"])}</div>
         <div>${sel("stato_attivita","Stato attività",c.stato_attivita,["Da fare","Contattato","Insistere","Appuntamento fissato","Non interessato"])}</div>
+        <div>${inp("stato_followup","Esito dell'ultimo follow-up",c.stato_followup)}</div>
       </div>
-      ${inp("stato_followup","Esito dell'ultimo follow-up",c.stato_followup)}
       <div>${sel("tipologia","Tipologia (forzatura manuale)",c.tipologia,["Cliente caldo","Cliente raffreddamento","Cliente fermo","Ex-cliente storico","Prospect nuovo"])}
         ${forzataAMano(c)?`<div class="forzata">Dai dati risulta <b>${esc(stadio(c).t)}</b>: vale quello in elenco, nei filtri e sulla mappa.</div>`:''}</div>
     </div>
