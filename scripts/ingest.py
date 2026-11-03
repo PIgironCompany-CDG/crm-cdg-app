@@ -32,6 +32,8 @@ DL="https://content.dropboxapi.com/2/files/download"
 UL="https://content.dropboxapi.com/2/files/upload"
 LIST="https://api.dropboxapi.com/2/files/list_folder"
 MOVE="https://api.dropboxapi.com/2/files/move_v2"
+DEL="https://api.dropboxapi.com/2/files/delete_v2"
+META="https://api.dropboxapi.com/2/files/get_metadata"
 MKDIR="https://api.dropboxapi.com/2/files/create_folder_v2"
 MESI={"gennaio":"01","febbraio":"02","marzo":"03","aprile":"04","maggio":"05","giugno":"06",
       "luglio":"07","agosto":"08","settembre":"09","ottobre":"10","novembre":"11","dicembre":"12"}
@@ -53,6 +55,21 @@ def ul(t,path,data):
 def move(t,frm,to):
     return requests.post(MOVE,headers={"Authorization":"Bearer "+t,"Content-Type":"application/json"},
         data=json.dumps({"from_path":frm,"to_path":to,"autorename":True}),timeout=60)
+def delete(t,path):
+    return requests.post(DEL,headers={"Authorization":"Bearer "+t,"Content-Type":"application/json"},
+        data=json.dumps({"path":path}),timeout=60)
+def meta(t,path):
+    """Metadati del file, None se non esiste. Serve il content_hash per sapere
+    se il file in archivio è già quello che stiamo per archiviare."""
+    r=requests.post(META,headers={"Authorization":"Bearer "+t,"Content-Type":"application/json"},
+        data=json.dumps({"path":path}),timeout=30)
+    return r.json() if r.status_code==200 else None
+def hash_dropbox(b):
+    """content_hash di Dropbox: SHA256 dei blocchi da 4 MiB, concatenati e
+    ri-hashati. Serve per confrontare senza riscaricare l'archivio."""
+    blocchi=b"".join(hashlib.sha256(b[i:i+4*1024*1024]).digest()
+                     for i in range(0,max(len(b),1),4*1024*1024))
+    return hashlib.sha256(blocchi).hexdigest()
 def mkdir(t,path):
     requests.post(MKDIR,headers={"Authorization":"Bearer "+t,"Content-Type":"application/json"},
         data=json.dumps({"path":path}),timeout=30)
@@ -410,10 +427,18 @@ def indicizza_documenti(t, clienti):
         elif "CONTRATT" in nome: sorgenti.append(("contratto",p)); visti.add(p)
     nuovi=0
     for tipo,cartella in sorgenti:
-        # file sciolti + file dentro le cartelle per cliente
-        lavoro=[(e,"") for e in listing(t,cartella)]
-        for sc in sottocartelle(t,cartella):
-            lavoro += [(e,sc["name"]) for e in listing(t,sc["path_lower"])]
+        # File sciolti e file dentro le cartelle per cliente, a qualunque
+        # profondità: fermarsi al primo livello lasciava indietro gli archivi
+        # organizzati per mese (CONTRATTI/ZERBETTO/Aprile/firmati/...), e
+        # l'indice restava con voci che puntavano a file mai archiviati.
+        # L'etichetta del cliente resta il PRIMO livello: è quello che porta il nome.
+        def raccogli(base, etichetta, prof=0):
+            fuori=[(e,etichetta) for e in listing(t,base)]
+            if prof < 4:
+                for sc in sottocartelle(t,base):
+                    fuori += raccogli(sc["path_lower"], etichetta or sc["name"], prof+1)
+            return fuori
+        lavoro = raccogli(cartella, "")
         if not lavoro: continue
         print(f"   {tipo}: {len(lavoro)} file da archiviare")
         for e,sottocart in lavoro:
@@ -427,10 +452,33 @@ def indicizza_documenti(t, clienti):
             anno=(info["data"] or datetime.date.today().isoformat())[:4]
             dest=f"{DOCS_DIR}/{tipo}/"+(sottocart if sottocart else anno)
             mkdir(t,f"{DOCS_DIR}/{tipo}"); mkdir(t,dest)
-            r=move(t,e["path_lower"],f"{dest}/{nome}")
-            if r.status_code!=200:
-                print(f"   ! archiviazione fallita: {nome} {r.status_code} {r.text[:120]}"); continue
-            finale=r.json().get("metadata",{}).get("path_display",f"{dest}/{nome}")
+            # Lo stesso file può tornare nei caricamenti più volte (la cartella
+            # di lavoro viene ricopiata). Con autorename finiva in archivio come
+            # "nome (1).xlsx": 321 doppioni in due ingestioni. Prima di muovere
+            # si guarda se in archivio c'è già, e se è lo stesso file.
+            gia=meta(t,f"{dest}/{nome}")
+            if gia:
+                uguale = b is not None and gia.get("content_hash")==hash_dropbox(b)
+                if not uguale and b is None:
+                    orig=dl(t,e["path_lower"])
+                    uguale = orig is not None and gia.get("content_hash")==hash_dropbox(orig)
+                if uguale:
+                    delete(t,e["path_lower"])          # identico: tolgo la copia, non ne creo un'altra
+                    finale=gia.get("path_display",f"{dest}/{nome}")
+                    print(f"     {nome} già in archivio, tolto dai caricamenti")
+                else:
+                    radice,est=os.path.splitext(nome)
+                    nome=f"{radice} (revisione {datetime.date.today().strftime('%d.%m.%Y')}){est}"
+                    r=move(t,e["path_lower"],f"{dest}/{nome}")
+                    if r.status_code!=200:
+                        print(f"   ! archiviazione fallita: {nome} {r.status_code} {r.text[:120]}"); continue
+                    finale=r.json().get("metadata",{}).get("path_display",f"{dest}/{nome}")
+                    print(f"     {nome}: versione diversa da quella in archivio, tenute entrambe")
+            else:
+                r=move(t,e["path_lower"],f"{dest}/{nome}")
+                if r.status_code!=200:
+                    print(f"   ! archiviazione fallita: {nome} {r.status_code} {r.text[:120]}"); continue
+                finale=r.json().get("metadata",{}).get("path_display",f"{dest}/{nome}")
             key=hashlib.md5((tipo+"|"+nome+"|"+(sottocart or "")).encode("utf-8")).hexdigest()[:12]
             indice[key]={"id":key,"tipo":tipo,"nome":nome,"path":finale,
                          "cliente":info["cliente"],"ragione":info["ragione"],

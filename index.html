@@ -3631,7 +3631,8 @@ function costruisciGiornata(st){
           zonaTot:zona.length,inZonaMesse:zonaCodici.size,zonaKm:st.zona,
           zonaNomi:fissi.length?[...new Set(fissi.map(f=>f.comune).filter(Boolean))]
                                 :(areaScelta?["provincia di "+areaScelta]:[]),
-          zonaAuto:!fissi.length && !st.area && !!areaScelta, areaScelta, maxTappe, andataZona};
+          zonaAuto:!fissi.length && !st.area && !!areaScelta, areaScelta, maxTappe, andataZona,
+          inizio:st.inizio, fine:st.fine};   // i limiti della giornata, utili a chi legge il piano
 }
 
 // ---------- Pannelli, pin, filtri ----------
