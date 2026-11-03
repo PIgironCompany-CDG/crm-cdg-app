@@ -600,6 +600,9 @@
       <select id="fStatus"><option value="">Tutti gli stati</option></select>
       <select id="fRegione"><option value="">Tutte le regioni</option></select>
       <select id="fProv"><option value="">Tutte le province</option></select>
+      <!-- Stessa scelta della tendina in intestazione: due comandi, un solo
+           stato. Chi cerca il filtro lo cerca qui, insieme agli altri. -->
+      <select id="fOwner" title="Mostra solo i clienti di un venditore"></select>
     </div>
     <div class="count" id="count"></div>
     <div class="grid" id="grid"></div>
@@ -876,23 +879,31 @@ async function loadData(){
 // Cambiarlo non ridisegna la mappa se non è mai stata aperta: ci pensa
 // assicuraSezione al primo ingresso.
 function popolaVenditoreGlobale(){
-  const s=document.getElementById('vendGlob'); if(!s) return;
   const nomi=[...new Set(DATA.map(venditoreDi).filter(Boolean))].sort();
-  s.innerHTML='<option value="">Tutti i venditori</option>'+
+  const voci='<option value="">Tutti i venditori</option>'+
     nomi.map(v=>`<option value="${escAttr(v)}">${esc(v)}</option>`).join("")+
     '<option value="__nessuno">Da assegnare</option>';
-  if(![...s.options].some(o=>o.value===VEND_SEL)) VEND_SEL="";
-  s.value=VEND_SEL;
-  if(!s._legato){
+  const box=['vendGlob','fOwner'].map(i=>document.getElementById(i)).filter(Boolean);
+  if(!box.length) return;
+  if(!nomi.includes(VEND_SEL) && VEND_SEL!=="__nessuno") VEND_SEL="";
+  box.forEach(s=>{
+    s.innerHTML=voci; s.value=VEND_SEL;
+    if(s._legato) return;
     s._legato=1;
-    s.addEventListener('change',()=>{
-      VEND_SEL=s.value;
-      try{ localStorage.setItem('crm_venditore',VEND_SEL); }catch(e){}
-      renderPStrip(); render();
-      if(SEZ_PRONTE['mappa']) disegnaPunti(true);
-      if(SEZ_PRONTE['cal']) renderCal();
-    });
-  }
+    s.addEventListener('change',()=>cambiaVenditore(s.value));
+  });
+}
+// Un solo stato per due comandi: la tendina in intestazione e quella nella
+// barra dei filtri devono restare allineate, qualunque delle due si tocchi.
+function cambiaVenditore(v){
+  VEND_SEL=v;
+  try{ localStorage.setItem('crm_venditore',VEND_SEL); }catch(e){}
+  ['vendGlob','fOwner'].forEach(i=>{
+    const e=document.getElementById(i); if(e && e.value!==VEND_SEL) e.value=VEND_SEL;
+  });
+  renderPStrip(); render();
+  if(SEZ_PRONTE['mappa']) disegnaPunti(true);
+  if(SEZ_PRONTE['cal']) renderCal();
 }
 // Un'attività è "del venditore" se lo è il cliente a cui si riferisce. Quelle
 // senza cliente restano visibili a tutti: sono impegni di struttura.
