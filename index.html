@@ -40,7 +40,16 @@
   header button{background:#3a4450;color:#fff;border:0;border-radius:8px;padding:7px 12px;font-size:13px;font-weight:600}
   #btnAgg{padding:6px 10px;font-size:15px;line-height:1}
   #aggTs{font-size:11px;opacity:.75;white-space:nowrap}
-  @media(max-width:600px){#aggTs{display:none}}
+  #vendGlob{background:#3a4450;color:#fff;border:0;border-radius:8px;padding:7px 10px;
+    font:inherit;font-size:13px;font-weight:600;max-width:46vw}
+  #vendGlob:focus{outline:2px solid #6b7b8c}
+  @media(max-width:640px){.bar input,.bar select,.fi{font-size:16px}}
+  @media(max-width:600px){#aggTs{display:none}
+    header{gap:8px;padding:10px 12px}
+    header h1{font-size:15px;max-width:34vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #vendGlob{font-size:12px;padding:6px 8px}
+    header .who{max-width:26vw}}
+  @media(max-width:380px){header h1{display:none}}
   /* Con otto sezioni la barra non ci sta più su un telefono: scorre in orizzontale
      invece di andare a capo o comprimere le voci fino a renderle illeggibili. */
   nav.tabs{display:flex;gap:4px;background:#fff;border-bottom:1px solid var(--line);padding:0 12px;position:sticky;top:52px;z-index:4;
@@ -79,7 +88,29 @@
   /* DRAWER */
   .ov{position:fixed;inset:0;background:rgba(20,24,28,.45);display:none;z-index:8}
   .ov.open{display:block}
-  .drawer{position:fixed;top:0;right:0;height:100%;width:min(520px,100vw);background:#fff;transform:translateX(100%);transition:transform .18s;overflow:auto;z-index:9}
+  /* La scheda cliente copre metà schermo e si legge su due colonne: con una
+     colonna sola le informazioni che contano stavano sotto tre schermate di scroll. */
+  .drawer{position:fixed;top:0;right:0;height:100%;width:clamp(520px,52vw,1000px);background:#fff;
+    transform:translateX(100%);transition:transform .18s;overflow:auto;z-index:9}
+  .dcols{display:grid;grid-template-columns:1fr 1fr;align-items:start}
+  .dcols>div{min-width:0}
+  .dcols .sec:last-child{border-bottom:1px solid var(--line)}
+  .dcols>.col-sx{border-right:1px solid var(--line)}
+  /* slot multipli per referenti, telefoni e mail */
+  .slot{display:flex;gap:6px;margin-bottom:5px}
+  .slot .fi{flex:1;min-width:0}
+  .slot .delslot{flex:0 0 32px;border:1px solid var(--line);background:#fff;border-radius:8px;
+    color:var(--mid);font-size:17px;line-height:1;cursor:pointer}
+  .slot .delslot:hover{border-color:var(--crit);color:var(--crit)}
+  .addslot{border:1px dashed var(--line);background:#fff;border-radius:8px;padding:5px 9px;
+    font:inherit;font-size:12px;color:var(--blue);cursor:pointer;margin-top:2px}
+  .addslot:hover{border-color:var(--blue)}
+  .multi+.multi{margin-top:10px}
+  @media(max-width:900px){.drawer{width:100vw}.dcols{grid-template-columns:1fr}
+    .dcols>.col-sx{border-right:0}
+    /* sotto i 16px iOS ingrandisce la pagina da solo a ogni tocco su un campo */
+    .drawer .fi,.slot .fi,.drawer select.fi,.drawer input,.drawer select,.drawer textarea{font-size:16px}
+    .slot .delslot{flex:0 0 36px}}
   .drawer.open{transform:translateX(0)}
   .drawer .dh{background:var(--dark);color:#fff;padding:16px 18px;position:sticky;top:0}
   .drawer .dh h2{margin:0;font-size:18px;padding-right:36px}
@@ -198,56 +229,131 @@
   #tab-cbam .nota b{color:var(--dark)}
   #tab-cbam .card{cursor:default}
   #tab-cbam .parbox{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
-  /* ---------- Mappa ---------- */
-  #tab-mappa{padding-bottom:60px}
-  #tab-mappa .mpbar{display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px;align-items:center}
-  #tab-mappa .mpbar input[type=search],#tab-mappa .mpbar select{
-    padding:7px 9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:#fff}
-  #tab-mappa .mpbar input[type=search]{flex:1 1 220px;min-width:160px}
-  #mappa{height:min(58vh,560px);min-height:300px;margin:0 16px;border:1px solid var(--line);
-    border-radius:12px;background:var(--light);z-index:0}
-  #tab-mappa .mplegend{display:flex;flex-wrap:wrap;gap:12px;padding:9px 16px 0;font-size:12px;color:var(--mid);align-items:center}
-  #tab-mappa .mplegend .mphint{flex:1 1 100%;font-size:11px;color:var(--mid);opacity:.85}
-  .mk{display:inline-block;width:11px;height:11px;border-radius:50%;vertical-align:-1px;margin-right:4px;border:2px solid #fff;
-    box-shadow:0 0 0 1px rgba(0,0,0,.25)}
+  /* ---------- Mappa: schermo intero, tre pannelli ---------- */
+  /* Niente confini regionali scaricati: la selezione di una regione inquadra le
+     sue fonderie e spegne le altre. Costa zero in caricamento, che è la priorità. */
+  #tab-mappa{position:fixed;inset:104px 0 0 0;padding:0;overflow:hidden}
+  #mappa{position:absolute;inset:0;background:var(--light);z-index:0}
+  #tab-mappa aside,#tab-mappa .mp-giu{position:absolute;z-index:500;background:#fff;
+    border:1px solid var(--line);box-shadow:0 6px 28px rgba(20,28,38,.14)}
+
+  .mp-sx{top:12px;left:12px;bottom:70px;width:308px;border-radius:14px;display:flex;flex-direction:column;overflow:hidden}
+  .mp-cerca{display:flex;gap:6px;padding:10px 10px 6px}
+  .mp-cerca input{flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px}
+  .mp-cerca button{width:34px;border:1px solid var(--line);border-radius:9px;background:#fff;cursor:pointer;font-size:14px}
+  .mp-cerca button.on{background:var(--dark);color:#fff;border-color:var(--dark)}
+  .mp-zone,.mp-altri{display:grid;gap:6px;padding:0 10px 8px}
+  .mp-zone{grid-template-columns:1fr 1fr}
+  .mp-zone select,.mp-altri select{width:100%;padding:8px 9px;border:1px solid var(--line);
+    border-radius:9px;font:inherit;font-size:12.5px;background:#fff}
+  .mp-altri{border-bottom:1px solid var(--line)}
+  .mp-conta{padding:0 12px 8px;font-size:11px;color:var(--mid);text-transform:uppercase;letter-spacing:.04em}
+  .mp-lista{flex:1;overflow:auto;padding:0 6px 6px;-webkit-overflow-scrolling:touch}
+  .mp-riga{padding:8px 9px;border-radius:9px;cursor:pointer;display:flex;gap:8px;align-items:flex-start}
+  .mp-riga:hover{background:var(--light)}
+  .mp-riga.sel{background:#e8eef6;box-shadow:inset 0 0 0 1px var(--blue)}
+  .mp-riga .pal{width:9px;height:9px;border-radius:50%;margin-top:4px;flex:0 0 auto}
+  .mp-riga b{display:block;font-size:12.5px;font-weight:600;line-height:1.25}
+  .mp-riga i{font-style:normal;font-size:11px;color:var(--mid)}
+  .mp-riga .agg{margin-left:auto;border:1px solid var(--line);background:#fff;border-radius:7px;
+    width:24px;height:24px;cursor:pointer;font-size:14px;line-height:1;color:var(--blue);flex:0 0 auto}
+  .mp-riga .agg:hover{border-color:var(--blue)}
+  .mp-piede{padding:8px 10px;border-top:1px solid var(--line)}
+  .mp-primario{width:100%;padding:9px;border-radius:9px;border:0;background:var(--blue);color:#fff;
+    font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+  .mp-primario:disabled{opacity:.5;cursor:default}
+
+  /* La scheda azienda non sparisce: si ritira lasciando una linguetta verticale
+     di 30 px sul bordo, che la riapre al clic. Stessa logica della maniglia dei giri. */
+  .mp-dx{top:12px;right:12px;bottom:70px;width:360px;border-radius:14px;padding:0;display:flex;
+    transform:translateX(calc(100% - 18px));transition:transform .26s ease}
+  .mp-dx.aperta{transform:none}
+  .mp-linguetta{flex:0 0 30px;border:0;border-right:1px solid var(--line);background:var(--light);
+    cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;
+    border-radius:14px 0 0 14px;color:var(--mid)}
+  .mp-linguetta:hover{background:#e4e9ee;color:var(--dark)}
+  .mp-linguetta b{writing-mode:vertical-rl;transform:rotate(180deg);font-size:11.5px;font-weight:600;
+    white-space:nowrap;overflow:hidden;max-height:70%;text-overflow:ellipsis;letter-spacing:.02em}
+  .mp-dx-scroll{flex:1;min-width:0;overflow:auto;padding:14px 16px}
+  .mp-dx h4{margin:0 0 2px;font-size:16px;font-weight:650;letter-spacing:-.01em}
+  .mp-dx .sotto{font-size:12px;color:var(--mid);margin-bottom:10px}
+  .mp-kv{display:grid;grid-template-columns:1fr 1fr;gap:7px 10px;margin:10px 0}
+  .mp-kv div{background:var(--light);border-radius:9px;padding:7px 9px}
+  .mp-kv .l{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mid)}
+  .mp-kv .v{font-size:13.5px;font-weight:650;margin-top:1px}
+  .mp-azioni{display:grid;gap:6px;margin-top:10px}
+  .mp-azioni button{padding:8px;border-radius:9px;border:1px solid var(--line);background:#fff;
+    font:inherit;font-size:12.5px;cursor:pointer;text-align:left}
+  .mp-azioni button:hover{border-color:var(--blue)}
+
+  /* Il cassetto dei giri si alza accanto al pannello comandi, non sopra: mentre
+     componi un giro devi poter continuare a cliccare le fonderie in elenco. */
+  .mp-giu{left:332px;right:48px;bottom:0;height:min(74vh,660px);border-radius:14px 14px 0 0;
+    transform:translateY(calc(100% - 44px));transition:transform .28s ease;display:flex;flex-direction:column}
+  .mp-giu.aperto{transform:none}
+  #tab-mappa.scheda .mp-giu{right:384px}
+  .mp-maniglia{height:44px;display:flex;align-items:center;gap:10px;padding:0 16px;cursor:pointer;
+    border-bottom:1px solid var(--line);flex:0 0 auto}
+  .mp-maniglia span{width:38px;height:4px;border-radius:3px;background:var(--sand)}
+  .mp-maniglia b{font-size:13px}
+  .mp-giu-corpo{flex:1;overflow:auto;padding:12px 16px 18px}
+  .vg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+  .vg-card{border:1px solid var(--line);border-radius:12px;padding:11px 13px}
+  .vg-card.corrente{border-color:var(--blue);box-shadow:0 0 0 2px rgba(38,87,138,.12)}
+  .vg-card h5{margin:0 0 3px;font-size:13.5px;font-weight:650}
+  .vg-card .meta{font-size:11.5px;color:var(--mid);margin-bottom:7px}
+  .vg-tappe{font-size:12px;line-height:1.5}
+  .vg-tappe div{display:flex;gap:7px;align-items:baseline}
+  .vg-tappe .ora{font-variant-numeric:tabular-nums;color:var(--mid);min-width:40px}
+  .vg-acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+  .vg-acts button{padding:6px 9px;border-radius:8px;border:1px solid var(--line);background:#fff;
+    font:inherit;font-size:11.5px;cursor:pointer}
+  .vg-acts button.primo{background:var(--blue);color:#fff;border-color:var(--blue)}
+
+  /* pin: ingrandisce al passaggio, mostra il nome; il clic apre la scheda */
+  .pin{border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);
+    transition:transform .14s ease,box-shadow .14s ease}
+  .pin.approx{border-style:dashed}
+  .pin.spento{opacity:.22}
+  .pin.sel{box-shadow:0 0 0 5px rgba(38,87,138,.35),0 1px 4px rgba(0,0,0,.35)}
+  .pin-wrap:hover .pin{transform:scale(1.65);z-index:600}
+  .pin-nome{position:absolute;left:50%;transform:translateX(-50%);bottom:16px;white-space:nowrap;
+    background:var(--dark);color:#fff;font-size:11px;padding:2px 7px;border-radius:6px;
+    opacity:0;transition:opacity .14s ease;pointer-events:none}
+  .pin-wrap:hover .pin-nome{opacity:1}
+  .pin-wrap.tappa .pin{border-color:var(--ok);border-width:3px}
+
+  /* testi e controlli dentro i pannelli: le regole globali erano legate ad altri tab */
+  #tab-mappa .nota{padding:10px 12px;background:var(--light);border:1px solid var(--line);
+    border-left:3px solid var(--blue);border-radius:10px;font-size:12.5px;color:var(--mid);line-height:1.5}
+  #tab-mappa .nota b{color:var(--dark)}
+  #tab-mappa .avviso{padding:10px 12px;border-radius:10px;font-size:12.5px}
+  #tab-mappa .avviso.warn{background:var(--warn-bg);color:var(--warn);border:1px solid rgba(138,97,0,.26)}
+  #tab-mappa .who{font-size:11.5px;color:var(--mid)}
+  #tab-mappa .fl{margin:0 0 3px;font-size:11px}
+  #tab-mappa .fi{padding:7px 9px;font-size:13px;border-radius:8px}
+  #tab-mappa .dh4{margin:0 0 6px;font-size:12px}
+  #tab-mappa .badge{background:var(--mid);font-weight:600;letter-spacing:.01em}
+  #tab-mappa .badge.ok{background:var(--ok)}
+  #tab-mappa .badge.warn{background:#8a6100}
+  #tab-mappa .badge.neutro{background:#8a8f96}
+  @media(max-width:860px){
+    #tab-mappa{inset:100px 0 0 0}
+    .mp-sx{left:8px;right:8px;width:auto;bottom:auto;max-height:46vh}
+    .mp-dx{left:8px;right:8px;width:auto;top:auto;bottom:52px;max-height:58vh;
+      flex-direction:column;transform:translateY(calc(100% - 34px))}
+    .mp-dx.aperta{transform:none}
+    .mp-linguetta{flex:0 0 34px;border-right:0;border-bottom:1px solid var(--line);
+      border-radius:14px 14px 0 0}
+    .mp-linguetta b{writing-mode:horizontal-tb;transform:none;max-height:none;max-width:80%}
+    .mp-giu,#tab-mappa.scheda .mp-giu{left:0;right:0;height:78vh;border-radius:14px 14px 0 0}
+    .mp-cerca input,.mp-zone select,.mp-altri select,#tab-mappa .fi,
+    #tab-mappa input,#tab-mappa select{font-size:16px}
+    .mp-riga .agg{width:30px;height:30px}
+  }
+  .mk{display:inline-block;width:11px;height:11px;border-radius:50%;vertical-align:-1px;margin-right:4px;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
   .mk-caldo{background:#c2571f}.mk-contratto{background:#1f7a45}.mk-raffreddamento{background:#2b7fb8}
   .mk-fermo{background:#8a8f96}.mk-ex{background:#5c6672}.mk-prospect{background:#7b4fa8}
-  .lmk{border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}
-  .lmk.approx{border-style:dashed;opacity:.8}
-  .lmk.sel{box-shadow:0 0 0 4px rgba(38,87,138,.45),0 1px 4px rgba(0,0,0,.4)}
-  #tab-mappa .mpplan{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;padding:0 16px}
-  #tab-mappa .mpaz{display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px}
-  #tab-mappa .mpaz button{padding:9px 14px;border-radius:9px;border:1px solid var(--line);background:#fff;
-    font:inherit;font-size:13px;cursor:pointer}
-  #tab-mappa .mpaz button.primario{background:var(--blue);color:#fff;border-color:var(--blue);font-weight:600}
-  #tab-mappa .mpaz button:disabled{opacity:.5;cursor:default}
-  #tab-mappa .tabwrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:#fff;margin:10px 16px 0}
-  #tab-mappa .tab-dati{width:100%;border-collapse:collapse;font-size:13px}
-  #tab-mappa .tab-dati th,#tab-mappa .tab-dati td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
-  #tab-mappa .tab-dati thead th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mid);background:var(--light)}
-  #tab-mappa .tab-dati td.n,#tab-mappa .tab-dati th.n{text-align:right;white-space:nowrap}
-  #tab-mappa .nota,#tab-mappa .avviso{margin:10px 16px 0;font-size:13px}
-  #tab-mappa .tabwrap{-webkit-overflow-scrolling:touch}
-  /* iPad e tablet: la mappa può prendersi più altezza, i parametri stanno in due colonne */
-  @media(min-width:641px) and (max-width:1024px){
-    #mappa{height:min(50vh,460px)}
-    #tab-mappa .mpplan{grid-template-columns:repeat(2,1fr)}
-  }
-  @media(max-width:640px){
-    #mappa{height:52vh;min-height:260px;margin:0 10px;border-radius:10px}
-    #tab-mappa .mpbar{padding:8px 10px}
-    #tab-mappa .mpbar input[type=search],#tab-mappa .mpbar select{font-size:16px} /* sotto i 16px iOS zooma da solo */
-    #tab-mappa .mpplan,#tab-mappa .mpaz{padding-left:10px;padding-right:10px}
-    #tab-mappa .mpplan{grid-template-columns:1fr 1fr;gap:8px}
-    #tab-mappa .tabwrap{margin-left:10px;margin-right:10px}
-    #tab-mappa .mpaz button{flex:1 1 100%}
-    #tab-mappa .fi{font-size:16px}
-    /* In verticale servono le colonne che decidono: orario, chi, perché.
-       Dove e giorni di silenzio restano nella scheda cliente, a un tocco. */
-    #tab-mappa #gg_tappe th:nth-child(3),#tab-mappa #gg_tappe td:nth-child(3),
-    #tab-mappa #gg_tappe th:nth-child(5),#tab-mappa #gg_tappe td:nth-child(5){display:none}
-    #tab-mappa .mplegend{gap:8px;font-size:11px}
-  }
   @media(max-width:760px){#tab-cbam .scen{grid-template-columns:1fr}}
   @media(max-width:520px){#tab-cbam .bcfr{grid-template-columns:minmax(84px,110px) 1fr 46px;gap:7px}}
   /* OFFERTE: form compatto, parametri fissi bloccati */
@@ -351,6 +457,45 @@
     .weekgrid{grid-template-columns:1fr}
     .calbar{top:auto;position:static}
   }
+  /* Il funnel: cinque stadi che si escludono, con quanto vale ciascuno.
+     Su schermo stretto scorre in orizzontale come la striscia sotto. */
+  .funnel{display:flex;gap:8px;padding:12px 16px 0;overflow-x:auto;-webkit-overflow-scrolling:touch;
+    scrollbar-width:none}
+  .funnel::-webkit-scrollbar{display:none}
+  .fstadio{flex:1 1 0;min-width:148px;background:#fff;border:1px solid var(--line);border-radius:11px;
+    padding:8px 11px;cursor:pointer;display:grid;grid-template-columns:auto auto 1fr;
+    grid-template-areas:"pun num nome" "val val val";gap:0 7px;align-items:center}
+  .fstadio:hover{border-color:var(--sand)}
+  .fstadio.on{border-color:var(--blue);box-shadow:inset 0 0 0 1px var(--blue);background:#f4f7fb}
+  .fstadio:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+  .fstadio .pun{grid-area:pun;width:9px;height:9px;border-radius:50%}
+  .fstadio b{grid-area:num;font-size:19px;font-weight:700;line-height:1.1}
+  .fstadio .nm{grid-area:nome;font-size:12px;color:var(--mid);line-height:1.2}
+  .fstadio .val{grid-area:val;font-size:11.5px;color:var(--mid);margin-top:3px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  @media(max-width:640px){.funnel{padding:10px 10px 0;gap:6px}
+    .fstadio{flex:0 0 auto;min-width:132px;padding:7px 9px}
+    .fstadio b{font-size:17px}}
+  /* Il prossimo passo è l'informazione per cui si apre la lista: si vede prima
+     del resto, e la sua assenza si vede ancora di più. */
+  .card .pp{margin-top:6px;padding:5px 8px;border-radius:7px;background:var(--light);font-size:13px}
+  .card .pp.vicino{background:var(--warn-bg);color:var(--warn)}
+  .card .pp.tardi{background:var(--crit-bg);color:var(--crit)}
+  .card .pp.manca{background:#fff;border:1px dashed var(--sand);color:var(--mid);font-style:italic}
+  .card .pp .pmeta{color:inherit;opacity:.75}
+  .drawer .pp,.mp-dx .pp{padding:7px 10px;border-radius:8px;background:var(--light);
+    font-size:13px;margin-bottom:8px;line-height:1.4}
+  .drawer .pp.vicino,.mp-dx .pp.vicino{background:var(--warn-bg);color:var(--warn)}
+  .drawer .pp.tardi,.mp-dx .pp.tardi{background:var(--crit-bg);color:var(--crit)}
+  .drawer .pp.manca,.mp-dx .pp.manca{background:#fff;border:1px dashed var(--sand);color:var(--mid);font-style:italic}
+  .drawer .pp .pmeta,.mp-dx .pp .pmeta{display:block;opacity:.8;font-size:11.5px;font-style:normal}
+  .passo{margin:4px 0 10px}
+  .passo-riga{display:flex;gap:7px}
+  .passo-riga input[type=date]{flex:0 0 150px}
+  .passo-riga input:not([type=date]){flex:1;min-width:0}
+  @media(max-width:520px){.passo-riga{flex-wrap:wrap}.passo-riga input[type=date]{flex:1 1 100%}}
+  .forzata{font-size:11.5px;color:var(--warn);background:var(--warn-bg);border-radius:7px;
+    padding:4px 8px;margin-top:6px;line-height:1.35}
   .pstrip{display:flex;gap:8px;overflow-x:auto;padding:12px 16px 0;-webkit-overflow-scrolling:touch}
   .pchip{flex:0 0 auto;background:#fff;border:1px solid var(--line);border-radius:20px;padding:6px 13px;font-size:13px;cursor:pointer;white-space:nowrap}
   .pchip.on{background:var(--dark);color:#fff;border-color:var(--dark)}
@@ -383,6 +528,9 @@
 <div id="app" class="hidden">
   <header>
     <h1 id="title">CRM CDG</h1>
+    <!-- Il venditore si sceglie una volta sola e vale ovunque: clienti, mappa e
+         calendario. Prima lo si impostava tre volte, in tre tendine diverse. -->
+    <select id="vendGlob" title="Filtra tutta l'app per venditore"></select>
     <span class="sp"></span>
     <span class="who" id="aggTs"></span>
     <button id="btnAgg" title="Rileggi i dati dal server">⟳</button>
@@ -401,89 +549,57 @@
   </nav>
 
   <section id="tab-mappa" class="hidden">
-    <div class="mpbar">
-      <input type="search" id="mp_q" placeholder="Cerca azienda o comune…">
-      <select id="mp_tip"><option value="">Tutte le tipologie</option></select>
-      <select id="mp_reg"><option value="">Tutte le regioni</option></select>
-      <select id="mp_prov"><option value="">Tutte le province</option></select>
-      <select id="mp_own"><option value="">Tutti i venditori</option></select>
-      <select id="mp_sil"><option value="">Qualsiasi silenzio</option>
-        <option value="30">silenzio oltre 30 gg</option>
-        <option value="60">silenzio oltre 60 gg</option>
-        <option value="90">silenzio oltre 90 gg</option></select>
-      <label class="chk"><input type="checkbox" id="mp_fond" checked> solo fonderie</label>
-    </div>
-    <div class="count" id="mp_count"></div>
     <div id="mappa"></div>
-    <div class="mplegend">
-      <span><i class="mk mk-caldo"></i> caldo</span>
-      <span><i class="mk mk-contratto"></i> contratto attivo</span>
-      <span><i class="mk mk-raffreddamento"></i> raffreddamento</span>
-      <span><i class="mk mk-fermo"></i> fermo</span>
-      <span><i class="mk mk-ex"></i> ex-cliente</span>
-      <span><i class="mk mk-prospect"></i> prospect</span>
-      <span class="mphint">Il contorno tratteggiato segnala un punto sul centro del comune, non sull'indirizzo.</span>
-    </div>
 
-    <h3 class="dh3">Giornata di visite</h3>
-    <p class="dsubt">Scegli il giorno: prende gli appuntamenti già fissati, li tiene come tappe obbligate
-      e riempie il resto della giornata con le fonderie più vicine, garantendo il rientro ad Arese.</p>
-    <div class="mpplan">
-      <div><label class="fl">Giorno</label><input class="fi" id="gg_data" type="date"></div>
-      <div><label class="fl">Partenza</label><input class="fi" id="gg_ora" type="time" value="08:00"></div>
-      <div><label class="fl">Rientro entro</label><input class="fi" id="gg_fine" type="time" value="19:00"></div>
-      <div><label class="fl">Durata visita</label><select class="fi" id="gg_dur">
-        <option value="45">45 minuti</option><option value="60" selected>1 ora</option>
-        <option value="90">1 ora e mezza</option><option value="120">2 ore</option></select></div>
-      <div><label class="fl">Pausa pranzo</label><select class="fi" id="gg_pranzo">
-        <option value="0">nessuna</option><option value="45">45 minuti</option>
-        <option value="60" selected>1 ora</option></select></div>
-      <div><label class="fl">Velocità media</label><select class="fi" id="gg_vel">
-        <option value="55">55 km/h · molta città</option>
-        <option value="65" selected>65 km/h · misto</option>
-        <option value="80">80 km/h · molta autostrada</option></select></div>
-      <div><label class="fl">Zona attorno all'appuntamento</label><select class="fi" id="gg_zona">
-        <option value="25">25 km</option><option value="45" selected>45 km</option>
-        <option value="70">70 km</option><option value="100">100 km</option></select></div>
-      <div><label class="fl">Zona da battere</label><select class="fi" id="gg_area">
-        <option value="">la sceglie il sistema</option></select></div>
-    </div>
-    <div id="gg_esito"></div>
-    <div class="tabwrap"><table class="tab-dati" id="gg_tappe"></table></div>
-    <div class="mpaz" id="gg_azioni"></div>
-    <h4 class="dh4">Se avanza tempo</h4>
-    <p class="dsubt">Un'ora a visita è una stima ottimista. Se una va corta, qui c'è chi hai intorno
-      e quanto ti costerebbe aggiungerlo, senza rifare i conti.</p>
-    <div class="tabwrap" id="gg_wrap_scarti"><table class="tab-dati" id="gg_scarti"></table></div>
+    <!-- pannello comandi, sempre presente a sinistra -->
+    <aside class="mp-sx" id="mp_sx">
+      <div class="mp-cerca">
+        <input type="search" id="mp_q" placeholder="Cerca azienda o comune…">
+        <button id="mp_tfiltri" title="Altri filtri">⚙</button>
+      </div>
+      <div class="mp-zone">
+        <select id="mp_reg"><option value="">Tutta Italia</option></select>
+        <select id="mp_prov"><option value="">Tutte le province</option></select>
+      </div>
+      <div class="mp-altri hidden" id="mp_altri">
+        <select id="mp_tip"><option value="">Tutti gli stati</option></select>
+        <select id="mp_sil"><option value="">Qualsiasi silenzio</option>
+          <option value="30">oltre 30 gg</option><option value="60">oltre 60 gg</option>
+          <option value="90">oltre 90 gg</option></select>
+        <label class="chk"><input type="checkbox" id="mp_fond" checked> solo fonderie</label>
+      </div>
+      <div class="mp-conta" id="mp_conta"></div>
+      <div class="mp-lista" id="mp_lista"></div>
+      <div class="mp-piede">
+        <button class="mp-primario" id="mp_nuovo">+ Nuovo giro di visite</button>
+      </div>
+    </aside>
 
-    <h3 class="dh3">Esplora lungo un percorso</h3>
-    <p class="dsubt">Per il caso opposto: hai già in mente dove andare e vuoi sapere chi incontri per strada.</p>
-    <div class="mpplan">
-      <div><label class="fl">Partenza</label><select class="fi" id="mp_da"></select></div>
-      <div><label class="fl">Destinazione</label><select class="fi" id="mp_a"></select></div>
-      <div><label class="fl">Data</label><input class="fi" id="mp_data" type="date"></div>
-      <div><label class="fl">Deviazione massima</label><select class="fi" id="mp_km">
-        <option value="10">10 km dalla rotta</option>
-        <option value="20" selected>20 km dalla rotta</option>
-        <option value="35">35 km dalla rotta</option>
-        <option value="50">50 km dalla rotta</option></select></div>
-    </div>
-    <div id="mp_rotta"></div>
-    <div class="tabwrap"><table class="tab-dati" id="mp_tappe"></table></div>
-    <div class="mpaz" id="mp_azioni"></div>
+    <!-- scheda azienda, entra da destra al clic sul pin -->
+    <aside class="mp-dx" id="mp_dx">
+      <button class="mp-linguetta" id="mp_dx_tab" title="Apri o chiudi la scheda">
+        <b id="mp_dx_eti">Scheda azienda</b></button>
+      <div class="mp-dx-scroll" id="mp_dx_corpo"></div>
+    </aside>
+
+    <!-- pannello viaggi, si alza dalla maniglia in basso -->
+    <section class="mp-giu" id="mp_giu">
+      <div class="mp-maniglia" id="mp_maniglia"><span></span>
+        <b id="mp_giu_tit">Giri di visite</b></div>
+      <div class="mp-giu-corpo" id="mp_giu_corpo"></div>
+    </section>
   </section>
 
   <section id="tab-clienti">
+    <div class="funnel" id="funnel"></div>
     <div class="pstrip" id="pstrip"></div>
     <div style="padding:10px 16px 0"><button id="btnNuovo" class="savepill">+ Nuovo cliente</button></div>
     <div class="bar">
       <input type="search" id="q" placeholder="Cerca ragione sociale, comune, referente…">
       <select id="fSettore"><option value="">Tutti i settori</option></select>
       <select id="fStatus"><option value="">Tutti gli stati</option></select>
-      <select id="fStatoCalc"><option value="">Stato commerciale</option><option>Contratto attivo</option><option>Cliente caldo</option><option>Cliente raffreddamento</option><option>Da riprendere</option><option value="__liberi">Senza contratto in corso</option></select>
       <select id="fRegione"><option value="">Tutte le regioni</option></select>
       <select id="fProv"><option value="">Tutte le province</option></select>
-      <select id="fOwner"><option value="">Tutti i venditori</option></select>
     </div>
     <div class="count" id="count"></div>
     <div class="grid" id="grid"></div>
@@ -635,19 +751,27 @@ let CBAM = { prezzo_certificato:75.28, benchmark:{A:1.089,B:1.210},
   origini:{ "BRASILE":{valore_predefinito:1.478}, "RUSSIA":{valore_predefinito:3.040},
             "UCRAINA":{valore_predefinito:2.173}, "UE":{valore_predefinito:0} } };
 let USER = localStorage.getItem('crm_user')||"";
+// Venditore selezionato: una scelta sola per clienti, mappa e calendario,
+// ricordata fra le sessioni. "" = tutti, "__nessuno" = clienti da assegnare.
+let VEND_SEL = localStorage.getItem('crm_venditore')||"";
 let TIPO = "", PRESET = null, charts = {};
+let STADIO_SEL = "";    // stadio del funnel selezionato, "" = tutti
 
 function esc(s){return (s==null?"":String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 // In anagrafica il venditore e' scritto in modi diversi: "Francesco",
 // "F.Mastropasqua", e una scheda con tre nomi insieme. Per filtrare serve una
 // forma sola; la scrittura la sistemiamo nel database, non qui.
 const VENDITORI=["Jacopo","Francesco"];
+// In anagrafica convivono "Jacopo", "F.Mastropasqua", "Francesco/F. Mastropasqua/jacopo"
+// e, nelle attività, gli indirizzi di posta. Tutto va ricondotto a un nome solo,
+// altrimenti i filtri contano le stesse persone più volte.
+const ALIAS_VENDITORE={scarparo:"Jacopo", mastropasqua:"Francesco"};
 function venditoreDi(c){
   const v=String((c&&c.owner)||"").trim();
   if(!v) return "";
   const b=v.toLowerCase();
   for(const n of VENDITORI) if(b.includes(n.toLowerCase())) return n;
-  if(b.includes("mastropasqua")) return "Francesco";
+  for(const k in ALIAS_VENDITORE) if(b.includes(k)) return ALIAS_VENDITORE[k];
   return v;
 }
 function statoClass(t){
@@ -734,6 +858,7 @@ async function loadData(){
   NOTIF = j.notifiche || [];
   ATT = j.attivita || {};
   OFF = j.offerte || {};
+  VIAGGI = j.viaggi || {};
   CBAM = j.cbam || CBAM;
   CBAMIMP = j.cbamImpianti || CBAMIMP;
   CBAMSPE = j.cbamSpedizioni || CBAMSPE;
@@ -747,6 +872,37 @@ async function loadData(){
   document.getElementById('who').textContent=j.user||localStorage.getItem('crm_user')||"";
 }
 
+// Il selettore di venditore vive nell'intestazione e comanda tutte le sezioni.
+// Cambiarlo non ridisegna la mappa se non è mai stata aperta: ci pensa
+// assicuraSezione al primo ingresso.
+function popolaVenditoreGlobale(){
+  const s=document.getElementById('vendGlob'); if(!s) return;
+  const nomi=[...new Set(DATA.map(venditoreDi).filter(Boolean))].sort();
+  s.innerHTML='<option value="">Tutti i venditori</option>'+
+    nomi.map(v=>`<option value="${escAttr(v)}">${esc(v)}</option>`).join("")+
+    '<option value="__nessuno">Da assegnare</option>';
+  if(![...s.options].some(o=>o.value===VEND_SEL)) VEND_SEL="";
+  s.value=VEND_SEL;
+  if(!s._legato){
+    s._legato=1;
+    s.addEventListener('change',()=>{
+      VEND_SEL=s.value;
+      try{ localStorage.setItem('crm_venditore',VEND_SEL); }catch(e){}
+      renderPStrip(); render();
+      if(SEZ_PRONTE['mappa']) disegnaPunti(true);
+      if(SEZ_PRONTE['cal']) renderCal();
+    });
+  }
+}
+// Un'attività è "del venditore" se lo è il cliente a cui si riferisce. Quelle
+// senza cliente restano visibili a tutti: sono impegni di struttura.
+function attivitaDelVenditore(a){
+  if(!VEND_SEL || !a || !a.codice) return true;
+  const c=DATA.find(x=>x.codice===a.codice);
+  if(!c) return true;
+  return VEND_SEL==="__nessuno" ? !venditoreDi(c) : venditoreDi(c)===VEND_SEL;
+}
+
 // ---------- render ----------
 function fillSelect(id,vals){const s=document.getElementById(id);
   s.querySelectorAll('option:not(:first-child)').forEach(o=>o.remove());
@@ -755,7 +911,7 @@ function fillSelect(id,vals){const s=document.getElementById(id);
 function render(){
   const q=document.getElementById('q').value.toLowerCase();
   const fs=document.getElementById('fSettore').value,fst=document.getElementById('fStatus').value,fp=document.getElementById('fProv').value;
-  const freg=document.getElementById('fRegione').value, fow=document.getElementById('fOwner').value;
+  const freg=document.getElementById('fRegione').value, fow=VEND_SEL;
   const g=document.getElementById('grid'); g.innerHTML="";
   let n=0;
   DATA.filter(c=>{
@@ -764,26 +920,31 @@ function render(){
     // il venditore si confronta normalizzato: in anagrafica convivono "Francesco",
     // "F.Mastropasqua" e varianti con piu' nomi insieme
     if(fow){ if(fow==="__nessuno"){ if(venditoreDi(c)) return false; } else if(venditoreDi(c)!==fow) return false; }
-    const fsc=document.getElementById('fStatoCalc').value;
-    if(fsc==="__liberi"){ if(c.contratti_aperti) return false; }
-    else if(fsc && (c.stato_calcolato||"")!==fsc) return false;
     if(TIPO&&c.tipologia!==TIPO)return false;
+    if(STADIO_SEL && stadio(c).k!==STADIO_SEL) return false;
     if(PRESET&&!PRESET(c))return false;
     if(q){const b=((c.ragione||"")+" "+(c.comune||"")+" "+(c.referente||"")+" "+(c.codice||"")).toLowerCase(); if(!b.includes(q))return false;}
     return true;
   }).forEach(c=>{
     n++; const d=document.createElement('div'); d.className="card"; d.onclick=()=>openDrawer(c);
-    // lo stato calcolato dalle offerte e dai contratti prevale su quello scritto a mano
-    const st=c.stato_calcolato||c.tipologia;
+    // Uno stato solo, dedotto dai fatti. La tipologia scritta a mano, se li
+    // contraddice, si dichiara: non si nasconde e non vince.
+    const st=stadio(c);
     d.innerHTML=`<div class="top"><div><div class="rag">${esc(c.ragione)}</div>
         <div class="meta">${esc(c.settore||"—")} · ${esc(c.comune||"")} ${c.provincia?"("+esc(c.provincia)+")":""}</div></div>
-        <span class="tag ${statoClass(st)}">${esc(st||"—")}</span></div>
+        <span class="tag ${st.cls}">${esc(st.t)}</span></div>
+      ${forzataAMano(c)?`<div class="row forzata">In anagrafica è segnato “${esc(c.tipologia)}”</div>`:''}
       ${c.contratti_aperti?`<div class="row bandacontr">Contratto in corso · ${num(c.contratti_aperti)} ${c.contratti_aperti==1?'contratto':'contratti'} per ${tons(c.contratti_tonnellate)}</div>`:''}
       ${c.ultima_offerta?`<div class="row"><b>Ultima offerta:</b> ${esc(c.ultima_offerta)}
          ${c.ultima_offerta_prezzo?`· ${eurF(c.ultima_offerta_prezzo)} €/t`:''}
          ${c.giorni_da_offerta!=null?`<span class="pmeta">(${c.giorni_da_offerta} gg)</span>`:''}</div>`:''}
-      <div class="row"><b>Prossima azione:</b> ${esc(c.prossima_azione||"—")}</div>
-      ${c.data_followup?`<div class="row"><b>Follow-up:</b> ${esc(c.data_followup)}</div>`:""}`;
+      ${(()=>{const p=prossimoPasso(c);
+        if(!p) return `<div class="row pp manca">Nessun prossimo passo</div>`;
+        const q=p.scaduto?'tardi':(p.giorni<=7?'vicino':'');
+        const quando=p.scaduto?`in ritardo di ${-p.giorni} gg`
+          :(p.giorni===0?'oggi':(p.giorni===1?'domani':`fra ${p.giorni} gg`));
+        return `<div class="row pp ${q}"><b>${dataBreve(p.data)}</b> ${esc(p.testo)}
+          <span class="pmeta">${quando}${p.chi?' · '+esc(p.chi):''}</span></div>`;})()}`;
     g.appendChild(d);
   });
   document.getElementById('count').textContent=`${n} clienti`;
@@ -792,6 +953,27 @@ function render(){
 
 let CURRENT=null, CURRENT_COD=null;
 function escAttr(s){return esc(s).replace(/"/g,'&quot;');}
+// Campi a slot multipli (referenti, telefoni, mail). Restano UNA colonna nel
+// Master, con i valori separati da "; ": l'Excel non cambia, l'ingest nemmeno,
+// e nell'app si vedono come righe separate con + e ×.
+const CAMPI_MULTI=["referente","telefono","email"];
+function slotsDa(v){ return String(v||"").split(/\s*[;,]\s*/).map(x=>x.trim()).filter(Boolean); }
+function rigaSlot(val,tipo){
+  return `<div class="slot"><input class="fi ms" type="${tipo||'text'}" value="${escAttr(val||"")}">`+
+         `<button type="button" class="delslot" title="Togli questa riga">×</button></div>`;
+}
+function campoMulti(campo,label,val,tipo){
+  const v=slotsDa(val); if(!v.length) v.push("");
+  return `<div class="multi" data-campo="${campo}" data-tipo="${tipo||'text'}">
+    <label class="fl">${label}</label>${v.map(x=>rigaSlot(x,tipo)).join("")}
+    <button type="button" class="addslot" data-add="${campo}">+ ${label.toLowerCase()}</button></div>`;
+}
+function valoreMulti(campo){
+  const box=document.querySelector('.drawer .multi[data-campo="'+campo+'"]');
+  if(!box) return null;
+  return [...box.querySelectorAll('input.ms')].map(i=>i.value.trim()).filter(Boolean).join("; ");
+}
+
 function openDrawer(c){
   CURRENT_COD=c&&c.codice;
   CURRENT=c;
@@ -800,45 +982,77 @@ function openDrawer(c){
   const inp=(id,label,val,type)=>`<label class="fl">${label}</label><input class="fi" id="ed_${id}" type="${type||'text'}" value="${escAttr(val)}">`;
   const sel=(id,label,val,opts)=>{const o=["",...opts].map(x=>`<option${x===(val||"")?" selected":""}>${esc(x)}</option>`).join("");
     return `<label class="fl">${label}</label><select class="fi" id="ed_${id}">${o}</select>`;};
-  d.innerHTML=`<div class="dh"><button class="close" onclick="closeDrawer()">×</button>
-      <h2>${esc(c.ragione)}</h2><div class="sub">${esc(c.codice)} · ${esc(c.settore)} · ${esc(c.provincia)}</div></div>
+
+  // Colonna sinistra: chi è e che cosa ne facciamo. Colonna destra: che cosa è
+  // successo. Prima stavano in fila e per vedere l'ultima offerta si scorreva.
+  const sinistra=`
     <div class="sec"><h3>Contatti
         <button type="button" class="addbtn" id="an_edit" title="Modifica i dati anagrafici">✎ dati anagrafici</button></h3>
-      <div class="cgrid2">
-        <div><label class="fl">Referente acquisti</label><input class="fi" id="ed_referente" value="${escAttr(c.referente)}"></div>
-        <div><label class="fl">Telefono</label><input class="fi" id="ed_telefono" value="${escAttr(c.telefono)}"></div>
-      </div>
-      ${inp("email","Email",c.email)}
+      ${campoMulti("referente","Referenti acquisti",c.referente)}
+      ${campoMulti("telefono","Telefoni",c.telefono,"tel")}
+      ${campoMulti("email","Email",c.email,"email")}
       <div id="an_fisse" class="fisse">
         <div class="cgrid2">
-          <div><label class="fl">Ragione sociale</label><input class="fi ro" id="ed_ragione" value="${escAttr(c.ragione)}" disabled></div>
           <div><label class="fl">P.IVA</label><input class="fi ro" id="ed_piva" value="${escAttr(c.piva)}" disabled></div>
           <div><label class="fl">Settore</label><input class="fi ro" id="ed_settore" value="${escAttr(c.settore)}" disabled></div>
           <div><label class="fl">Proprietà</label><input class="fi ro" id="ed_proprieta" value="${escAttr(c.proprieta)}" disabled></div>
-          <div><label class="fl">Comune</label><input class="fi ro" id="ed_comune" value="${escAttr(c.comune)}" disabled></div>
-          <div><label class="fl">Provincia</label><input class="fi ro" id="ed_provincia" value="${escAttr(c.provincia)}" disabled></div>
-          <div><label class="fl">Regione</label><input class="fi ro" id="ed_regione" value="${escAttr(c.regione)}" disabled></div>
           <div><label class="fl">Venditore</label><select class="fi" id="ed_owner">
             <option value="">— da assegnare —</option>
             ${VENDITORI.map(v=>`<option${venditoreDi(c)===v?' selected':''}>${esc(v)}</option>`).join("")}
           </select></div>
+          <div><label class="fl">Comune</label><input class="fi ro" id="ed_comune" value="${escAttr(c.comune)}" disabled></div>
+          <div><label class="fl">Provincia</label><input class="fi ro" id="ed_provincia" value="${escAttr(c.provincia)}" disabled></div>
         </div>
+        <label class="fl">Regione</label><input class="fi ro" id="ed_regione" value="${escAttr(c.regione)}" disabled>
         <label class="fl">Indirizzo</label><input class="fi ro" id="ed_indirizzo" value="${escAttr(c.indirizzo)}" disabled>
+        <input type="hidden" id="ed_ragione" value="${escAttr(c.ragione)}">
       </div>
     </div>
-    <div class="sec"><h3>Stato commerciale</h3>
-      ${sel("tipologia","Tipologia",c.tipologia,["Cliente caldo","Cliente raffreddamento","Cliente fermo","Ex-cliente storico","Prospect nuovo"])}
-      ${sel("priorita","Priorità",c.priorita,["Alta","Media","Bassa"])}
-      ${sel("stato_attivita","Stato attività",c.stato_attivita,["Da fare","Contattato","Insistere","Appuntamento fissato","Non interessato"])}
-      ${inp("prossima_azione","Prossima azione",c.prossima_azione)}
-      ${inp("data_followup","Data follow-up",c.data_followup,"date")}
-      ${inp("stato_followup","Stato follow-up",c.stato_followup)}
+    <div class="sec"><h3>Situazione vendita
+        <button type="button" class="addbtn" onclick="nuovaAtt(null,'${esc(c.codice)}')">+ prossimo passo</button></h3>
+      ${(()=>{const p=prossimoPasso(c);
+        if(!p) return `<div class="pp manca">Nessun prossimo passo fissato: metti una data, altrimenti questo cliente non torna più a galla.</div>`;
+        const q=p.scaduto?'tardi':(p.giorni<=7?'vicino':'');
+        return `<div class="pp ${q}"><b>${dataBreve(p.data)}</b> ${esc(p.testo)}
+          <span class="pmeta">${p.scaduto?'in ritardo di '+(-p.giorni)+' gg':(p.giorni===0?'oggi':'fra '+p.giorni+' gg')}
+          · dal ${p.fonte}${p.chi?' · '+esc(p.chi):''}</span></div>`;})()}
+      <!-- Data e azione erano due campi lontani fra loro: una frase senza data
+           non è un piano. Qui sono una cosa sola, e si possono promuovere ad
+           appuntamento vero con un tasto. -->
+      <div class="passo">
+        <label class="fl">Prossimo passo — data e cosa fare</label>
+        <div class="passo-riga">
+          <input class="fi" id="ed_data_followup" type="date" value="${escAttr(c.data_followup)}">
+          <input class="fi" id="ed_prossima_azione" value="${escAttr(c.prossima_azione)}"
+            placeholder="es. richiamare per la quotazione Q1">
+        </div>
+        ${(()=>{const p=prossimoPasso(c);
+          return (p&&p.fonte==="calendario")
+            ? `<div class="pmeta">C'è già un impegno in calendario il ${dataBreve(p.data)}: in elenco e sulla mappa vale quello.</div>`
+            : '';})()}
+      </div>
+      <div class="cgrid2">
+        <div>${sel("priorita","Priorità",c.priorita,["Alta","Media","Bassa"])}</div>
+        <div>${sel("stato_attivita","Stato attività",c.stato_attivita,["Da fare","Contattato","Insistere","Appuntamento fissato","Non interessato"])}</div>
+      </div>
+      ${inp("stato_followup","Esito dell'ultimo follow-up",c.stato_followup)}
+      <div>${sel("tipologia","Tipologia (forzatura manuale)",c.tipologia,["Cliente caldo","Cliente raffreddamento","Cliente fermo","Ex-cliente storico","Prospect nuovo"])}
+        ${forzataAMano(c)?`<div class="forzata">Dai dati risulta <b>${esc(stadio(c).t)}</b>: vale quello in elenco, nei filtri e sulla mappa.</div>`:''}</div>
     </div>
-    ${c.stato_calcolato?`<div class="sec"><h3>Stato commerciale</h3>
+    <div class="sec"><h3>Salute aziendale (sola lettura)</h3><div class="kv">
+      ${ro("Ultimo bilancio",c.anno_bilancio)}${ro("Fatturato bilancio",c.fatturato_bilancio)}${ro("Utile/Perdita",c.utile)}
+      ${ro("Dipendenti",c.dipendenti)}${ro("Rating",c.rating)}${ro("Punteggio",c.punteggio)}
+      ${ro("Limite credito",c.limite_credito)}${ro("Fido proposto",c.fido_proposto?euro(c.fido_proposto):'')}
+      ${ro("GG medi pagamento",c.gg_pagamento)}</div></div>`;
+
+  const destra=`
+    ${`<div class="sec"><h3>Stato rilevato dai dati</h3>
       <div class="costibox" style="margin:0">
         <div class="totone" style="border:0;padding:0;margin:0">
-          <span class="tag ${statoClass(c.stato_calcolato)}" style="font-size:13px">${esc(c.stato_calcolato)}</span>
-          <b style="font-size:14px">${esc(c.motivo||'')}</b></div>
+          <span class="tag ${stadio(c).cls}" style="font-size:13px">${esc(stadio(c).t)}</span>
+          <b style="font-size:14px">${esc(c.motivo||c.stato_calcolato||'')}</b></div>
+        ${(()=>{const v=valoreAperto(c); return (v.ton||v.eur)?`<div class="pmeta" style="margin-top:6px">
+          In gioco: ${v.ton?tons(v.ton):'—'}${v.eur?' · € '+num(Math.round(v.eur)):''}</div>`:'';})()}
         ${c.contratti_aperti?`<div class="pmeta" style="margin-top:8px">
           ${num(c.contratti_aperti)} contratti aperti · ${tons(c.contratti_tonnellate)} · € ${num(c.contratti_valore)}
           ${(c.contratti_elenco||[]).length?'<br>'+c.contratti_elenco.map(x=>esc(x.documento)+' ('+tons(x.tonnellate)+')').join(' · '):''}
@@ -848,7 +1062,8 @@ function openDrawer(c){
           ${c.ultima_offerta_margine!=null?'· margine '+eurF(c.ultima_offerta_margine)+' €/t':''}
           ${c.ultima_offerta_rif?'· '+esc(c.ultima_offerta_rif):''}</div>`:''}
         ${c.ultima_vendita?`<div class="pmeta">Ultima fattura ${esc(c.ultima_vendita)}</div>`:''}
-      </div></div>`:''}
+        ${(c.esposizione!=null&&c.esposizione!=='')?`<div class="pmeta">Esposizione corrente ${euro(c.esposizione)}</div>`:''}
+      </div></div>`}
     ${bloccoOfferte(c.codice)}
     ${bloccoAttivita(c.codice)}
     <div class="sec"><h3>Note <button type="button" class="addbtn" onclick="showAdd('nota')">+ Aggiungi nota</button></h3>
@@ -863,20 +1078,38 @@ function openDrawer(c){
         <label class="fl">Scadenza (facoltativa)</label><input class="fi" id="due-azione" type="date">
         <div><button type="button" onclick="addInter('azione')">Aggiungi azione</button></div></div>
       <div class="pilllist" id="list-azione"></div>
-    </div>
-    <div class="sec"><h3>Salute aziendale (sola lettura)</h3><div class="kv">
-      ${ro("Ultimo bilancio",c.anno_bilancio)}${ro("Fatturato bilancio",c.fatturato_bilancio)}${ro("Utile/Perdita",c.utile)}
-      ${ro("Dipendenti",c.dipendenti)}${ro("Rating",c.rating)}${ro("Punteggio",c.punteggio)}${ro("Limite credito",c.limite_credito)}
-      ${ro("Esposizione corrente", (c.esposizione!=null&&c.esposizione!=='')?euro(c.esposizione):'—')}</div></div>
+    </div>`;
+
+  d.innerHTML=`<div class="dh"><button class="close" onclick="closeDrawer()">×</button>
+      <h2>${esc(c.ragione)}</h2><div class="sub">${esc(c.codice)} · ${esc(c.settore)} ·
+      ${esc(c.comune||"")}${c.provincia?" ("+esc(c.provincia)+")":""}${
+      venditoreDi(c)?" · "+esc(venditoreDi(c)):" · da assegnare"}</div></div>
+    <div class="dcols"><div class="col-sx">${sinistra}</div><div class="col-dx">${destra}</div></div>
     <div class="savebar"><button id="saveBtn">Salva modifiche</button><span id="saveMsg"></span></div>`;
   document.getElementById('saveBtn').onclick=saveEdit;
   renderInter(c.codice);
+  // slot multipli: aggiunta e rimozione con delega, così vale anche per le righe nuove
+  d.onclick=function(ev){
+    const add=ev.target.closest('.addslot');
+    if(add){
+      const box=d.querySelector('.multi[data-campo="'+add.dataset.add+'"]');
+      add.insertAdjacentHTML('beforebegin',rigaSlot("",box.dataset.tipo));
+      box.querySelector('.slot:last-of-type input').focus();
+      return;
+    }
+    const del=ev.target.closest('.delslot');
+    if(del){
+      const box=del.closest('.multi'), riga=del.closest('.slot');
+      if(box.querySelectorAll('.slot').length>1) riga.remove();
+      else riga.querySelector('input').value="";
+    }
+  };
   // matita: sblocca i dati anagrafici, che di norma restano fermi
   const ae=document.getElementById('an_edit');
   if(ae) ae.onclick=function(){
     const box=document.getElementById('an_fisse');
     const bloccati=box.querySelectorAll('input[disabled]').length>0;
-    box.querySelectorAll('input').forEach(i=>{ i.disabled=!bloccati; i.classList.toggle('ro',!bloccati); });
+    box.querySelectorAll('input:not([type=hidden])').forEach(i=>{ i.disabled=!bloccati; i.classList.toggle('ro',!bloccati); });
     box.classList.toggle('aperta',bloccati);
     this.textContent=bloccati?'✓ blocca dati anagrafici':'✎ dati anagrafici';
   };
@@ -884,7 +1117,7 @@ function openDrawer(c){
 }
 async function saveEdit(){
   if(!CURRENT) return;
-  const ids=["ragione","piva","settore","referente","email","telefono","proprieta","indirizzo","comune","provincia","regione","owner",
+  const ids=["ragione","piva","settore","proprieta","indirizzo","comune","provincia","regione","owner",
              "tipologia","priorita","stato_attivita","prossima_azione","data_followup","stato_followup"];
   const btn=document.getElementById('saveBtn'), msg=document.getElementById('saveMsg');
   // Anti-sovrascrittura: invio SOLO i campi effettivamente cambiati (non tutti)
@@ -892,6 +1125,11 @@ async function saveEdit(){
   ids.forEach(id=>{const el=document.getElementById('ed_'+id); if(!el) return;
     const orig=(CURRENT[id]==null?'':String(CURRENT[id]));
     if(String(el.value)!==orig) fields[id]=el.value;});
+  // referenti, telefoni e mail: più righe che tornano in una sola cella, separate da "; "
+  CAMPI_MULTI.forEach(id=>{
+    const v=valoreMulti(id); if(v==null) return;
+    const orig=(CURRENT[id]==null?'':String(CURRENT[id]));
+    if(v!==orig) fields[id]=v;});
   if(Object.keys(fields).length===0){ msg.textContent="Nessuna modifica da salvare."; return; }
   btn.disabled=true; btn.textContent="Salvataggio…"; msg.textContent="";
   try{
@@ -2257,6 +2495,7 @@ function attFiltrate(){
     if(tp && a.tipo!==tp) return false;
     if(ow==="__me" && String(a.owner||"").toLowerCase()!==String(USER||"").toLowerCase()) return false;
     if(ow && ow!=="__me" && a.owner!==ow) return false;
+    if(!attivitaDelVenditore(a)) return false;   // venditore scelto in intestazione
     return true;
   });
 }
@@ -2585,7 +2824,7 @@ document.querySelectorAll('#tab-dash .dsub button[data-d]').forEach(b=>b.onclick
   renderDash();
 });
 // i filtri manuali azzerano tipologia/preset impostati dai click dashboard
-['q','fSettore','fStatus','fProv','fStatoCalc','fRegione','fOwner'].forEach(id=>document.getElementById(id).addEventListener('input',()=>{TIPO="";PRESET=null;render();}));
+['q','fSettore','fStatus','fProv','fRegione'].forEach(id=>document.getElementById(id).addEventListener('input',()=>{TIPO="";PRESET=null;render();}));
 
 // ---------- DASHBOARD ----------
 function euro(n){return "€ "+Math.round(n||0).toLocaleString('it-IT');}
@@ -2607,7 +2846,6 @@ function goToClients(o){
   document.getElementById('fStatus').value=o.status||'';
   document.getElementById('fProv').value='';
   document.getElementById('fRegione').value='';
-  document.getElementById('fOwner').value='';
   document.getElementById('q').value='';
   TIPO=o.tipo||''; PRESET=o.preset||null;
   const first=document.querySelector('#pstrip .pchip'); if(first) setActiveChip(first);
@@ -2904,6 +3142,35 @@ function attDi(cod,tipi,soloFuture){
     && (!tipi || tipi.includes(a.tipo))
     && (!soloFuture || (a.stato==='pianificata' && String(a.data||'')>=oggi)));
 }
+// Il prossimo passo non è un campo da riempire: si deduce dalle fonti vere —
+// attività pianificate e data di follow-up — così non resta mai indietro
+// rispetto al calendario. Su 119 clienti, 90 non avevano una data: una scheda
+// senza prossimo passo è un cliente che nessuno sta lavorando, e si deve vedere.
+function prossimoPasso(c){
+  if(!c) return null;
+  const oggi=oggiIso();
+  const att=attDi(c.codice,null,false)
+    .filter(a=>a.stato==='pianificata' && a.data)
+    .sort((x,y)=>String(x.data).localeCompare(String(y.data)))[0];
+  const fu=c.data_followup||"";
+  let r=null;
+  if(att && (!fu || String(att.data)<=String(fu)))
+    r={data:String(att.data), testo:att.titolo||att.tipo||"attività",
+       // "f.mastropasqua" non è un nome: si normalizza come ovunque nell'app
+       chi:venditoreDi({owner:att.owner})||nomeBreve(att.owner||"")||venditoreDi(c),
+       fonte:"calendario", attId:att.id};
+  else if(fu)
+    r={data:String(fu), testo:c.prossima_azione||"Follow-up",
+       chi:venditoreDi(c), fonte:"follow-up"};
+  if(!r) return null;
+  r.scaduto = r.data < oggi;
+  r.giorni = Math.round((new Date(r.data+"T00:00:00") - new Date(oggi+"T00:00:00"))/864e5);
+  return r;
+}
+function dataBreve(iso){
+  const p=String(iso||"").slice(0,10).split("-");
+  return p.length===3 ? p[2]+"/"+p[1] : String(iso||"");
+}
 function haAppuntamento(c){ return attDi(c.codice,['appuntamento','visita'],true).length>0; }
 function daEsitareCliente(c){
   const ora=new Date();
@@ -2914,25 +3181,98 @@ function daEsitareCliente(c){
     return new Date(fine.getTime()+(a.durata_min||60)*60000)<ora;
   });
 }
+// ---------- IL FUNNEL ----------
+// Un cliente sta in uno stadio solo, letto dai fatti e non dal campo scritto a
+// mano: contratto in corso batte offerta aperta, offerta batte contatto. Così i
+// conteggi sommano al totale e "a che punto siamo" ha una risposta sola.
+// Prima le chip erano nove, si sovrapponevano e lasciavano fuori 60 clienti su 119.
+const GG_OFFERTA_VIVA=90;        // oltre, un'offerta senza risposta è morta
+const STADI=[
+  {k:"contratto", t:"Contratto in corso", col:"#1f7a45", cls:"t-contratto"},
+  {k:"offerta",   t:"Offerta aperta",     col:"#c2571f", cls:"t-caldo"},
+  {k:"contatto",  t:"In contatto",        col:"#2b7fb8", cls:"t-raffreddamento"},
+  {k:"dormiente", t:"Dormiente",          col:"#8a8f96", cls:"t-fermo"},
+  {k:"mai",       t:"Mai lavorato",       col:"#7b4fa8", cls:"t-prospect"},
+];
+function offerteAperte(cod){
+  const oggi=oggiIso();
+  return offList().filter(o=>o.codice===cod && (o.stato==="inviata"||o.stato==="bozza")
+    && (!o.validita || String(o.validita)>=oggi));
+}
+function stadio(c){
+  if(!c) return STADI[4];
+  if((c.contratti_aperti||0)>0) return STADI[0];
+  if(offerteAperte(c.codice).length) return STADI[1];
+  if(c.giorni_da_offerta!=null && c.giorni_da_offerta<=GG_OFFERTA_VIVA) return STADI[1];
+  const tocchi=attDi(c.codice,null,false).length + ((INTER&&INTER[c.codice]||[]).length);
+  if(tocchi || (c.gg_silenzio!=null && c.gg_silenzio<=GG_OFFERTA_VIVA)) return STADI[2];
+  if((c.n_ordini||0)>0 || (c.fatturato_storico||0)>0 || c.ultima_vendita) return STADI[3];
+  return STADI[4];
+}
+// Quanto vale lo stadio: contratti aperti a valore, offerte aperte a quantità per prezzo.
+function valoreAperto(c){
+  let eur=0, ton=0;
+  if((c.contratti_aperti||0)>0){ eur+=Number(c.contratti_valore)||0; ton+=Number(c.contratti_tonnellate)||0; }
+  offerteAperte(c.codice).forEach(o=>{
+    const q=Number(o.quantita)||0, pr=Number(o.prezzo_vendita)||0;
+    if(!o.quantita_libera){ ton+=q; eur+=q*pr; }
+  });
+  return {eur,ton};
+}
+// La tipologia scritta a mano resta, ma è una forzatura: se contraddice i fatti
+// si deve vedere, altrimenti si litiga su quale dei due numeri è quello buono.
+function forzataAMano(c){
+  const t=String(c.tipologia||"").toLowerCase(); if(!t) return false;
+  const k=stadio(c).k;
+  if(k==="contratto") return !t.includes("caldo") && !t.includes("attiv");
+  if(k==="offerta")   return !t.includes("caldo");
+  if(k==="dormiente") return !t.includes("fermo") && !t.includes("ex");
+  return false;
+}
+
+function clientiDelVenditore(){
+  if(!VEND_SEL) return DATA;
+  return DATA.filter(c=>VEND_SEL==="__nessuno" ? !venditoreDi(c) : venditoreDi(c)===VEND_SEL);
+}
+// Prima la coda di lavoro (cosa devo fare), poi gli stati (chi sono). Le chip
+// "Follow-up in scadenza/scaduti" guardavano solo il campo data_followup e
+// ignoravano il calendario: adesso leggono il prossimo passo, qualunque sia la fonte.
+// Le chip sono la coda di lavoro: cosa devo fare. Gli stadi sono il funnel qui
+// sopra: chi sono. Le due cose non vanno mescolate nella stessa striscia.
 const BUCKETS=[
-  {t:"Appuntamenti",f:haAppuntamento},
+  {t:"In ritardo",f:c=>{const p=prossimoPasso(c); return !!p&&p.scaduto;}},
+  {t:"Prossimi 7 giorni",f:c=>{const p=prossimoPasso(c); return !!p&&!p.scaduto&&p.giorni<=7;}},
+  {t:"Senza prossimo passo",f:c=>!prossimoPasso(c)},
   {t:"Da esitare",f:daEsitareCliente},
-  {t:"Caldi",f:c=>c.stato_calcolato==='Cliente caldo'},
-  {t:"Raffreddamento",f:c=>c.stato_calcolato==='Cliente raffreddamento'},
-  {t:"Contratto attivo",f:c=>(c.contratti_aperti||0)>0},
-  {t:"Da riprendere",f:c=>c.stato_calcolato==='Da riprendere'},
-  {t:"Mai contattati",f:c=>!c.stato_calcolato && !attDi(c.codice,null,false).length && !(INTER&&INTER[c.codice]||[]).length},
-  {t:"Follow-up in scadenza",f:c=>{if(!c.data_followup)return false;const t=new Date(new Date().toDateString());const d=new Date(c.data_followup);return d>=t&&d<=new Date(t.getTime()+14*864e5);}},
-  {t:"Follow-up scaduti",f:c=>{if(!c.data_followup)return false;return new Date(c.data_followup)<new Date(new Date().toDateString());}},
+  {t:"Appuntamenti",f:haAppuntamento},
 ];
 function setActiveChip(el){document.querySelectorAll('#pstrip .pchip').forEach(x=>x.classList.toggle('on',x===el));}
+function renderFunnel(){
+  const f=document.getElementById('funnel'); if(!f) return;
+  const base=clientiDelVenditore();
+  f.innerHTML=STADI.map(st=>{
+    const l=base.filter(c=>stadio(c).k===st.k);
+    const v=l.reduce((a,c)=>{const x=valoreAperto(c); return {eur:a.eur+x.eur, ton:a.ton+x.ton};},{eur:0,ton:0});
+    return `<div class="fstadio${STADIO_SEL===st.k?' on':''}" data-k="${st.k}" role="button" tabindex="0">
+      <span class="pun" style="background:${st.col}"></span>
+      <b>${l.length}</b><span class="nm">${esc(st.t)}</span>
+      <span class="val">${v.ton?tons(v.ton):'—'}${v.eur?' · € '+num(Math.round(v.eur)):''}</span></div>`;
+  }).join("");
+  f.querySelectorAll('.fstadio').forEach(el=>{
+    const vai=()=>{ STADIO_SEL = (STADIO_SEL===el.dataset.k) ? "" : el.dataset.k; renderFunnel(); render(); };
+    el.onclick=vai;
+    el.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); vai(); } };
+  });
+}
 function renderPStrip(){
+  renderFunnel();
   const s=document.getElementById('pstrip'); if(!s) return; s.innerHTML="";
   const all=document.createElement('div'); all.className="pchip on"; all.textContent="Tutti";
   all.onclick=()=>{PRESET=null;TIPO='';setActiveChip(all);render();}; s.appendChild(all);
-  BUCKETS.forEach(b=>{const n=DATA.filter(b.f).length; const c=document.createElement('div'); c.className="pchip";
+  const base=clientiDelVenditore();
+  BUCKETS.forEach(b=>{const n=base.filter(b.f).length; const c=document.createElement('div'); c.className="pchip";
     c.innerHTML=`<b>${n}</b>${b.t}`;
-    c.onclick=()=>{PRESET=b.f;TIPO='';document.getElementById('q').value='';document.getElementById('fSettore').value='';document.getElementById('fStatus').value='';document.getElementById('fProv').value='';document.getElementById('fRegione').value='';document.getElementById('fOwner').value='';setActiveChip(c);render();};
+    c.onclick=()=>{PRESET=b.f;TIPO='';document.getElementById('q').value='';document.getElementById('fSettore').value='';document.getElementById('fStatus').value='';document.getElementById('fProv').value='';document.getElementById('fRegione').value='';setActiveChip(c);render();};
     s.appendChild(c);});
 }
 
@@ -2944,11 +3284,7 @@ async function start(){
   fillSelect('fStatus',DATA.map(c=>c.status));
   fillSelect('fProv',DATA.map(c=>c.provincia));
   fillSelect('fRegione',DATA.map(c=>c.regione));
-  fillSelect('fOwner',DATA.map(venditoreDi));
-  const so=document.getElementById('fOwner');
-  if(so && !so.querySelector('option[value="__nessuno"]')){
-    const o=document.createElement('option'); o.value="__nessuno"; o.textContent="— senza venditore —"; so.appendChild(o);
-  }
+  popolaVenditoreGlobale();
   // All'avvio si disegna solo ciò che si vede: la lista clienti e i filtri.
   // Le altre sezioni vengono disegnate al primo ingresso nel loro tab (vedi SEZ_PRONTE):
   // con 119 clienti, 180 attività e 300 documenti, disegnare tutto insieme costava
@@ -2975,7 +3311,7 @@ function tabAttivo(){
 }
 function ridisegnaTuttoIlVisibile(){
   const t=tabAttivo();
-  render(); renderPStrip();          // la lista clienti e i filtri sono sempre validi
+  render(); renderPStrip();          // la lista clienti, il funnel e i filtri sono sempre validi
   updateBadge(); renderDaEsitare();  // contatori in alto
   // ridisegna solo le sezioni già aperte almeno una volta
   if(SEZ_PRONTE['cal']) renderCal();
@@ -2983,7 +3319,7 @@ function ridisegnaTuttoIlVisibile(){
   if(SEZ_PRONTE['fornitori']) renderForn();
   if(SEZ_PRONTE['inbox']) renderInbox();
   if(SEZ_PRONTE['cbam']) renderCbam();
-  if(SEZ_PRONTE['mappa']) disegnaPunti();
+  if(SEZ_PRONTE['mappa']){ disegnaPunti(); renderGiu(); }
   if(t==='dash') renderDash();
   if(CURRENT_COD){                   // se una scheda cliente è aperta, aggiorna anche quella
     const c=DATA.find(x=>x.codice===CURRENT_COD);
@@ -3031,12 +3367,12 @@ document.addEventListener('visibilitychange',()=>{
 // La navigazione vera la delega a Google Maps con un link: funziona su tutti i
 // telefoni e non richiede chiavi.
 const SEDE={nome:"Sede · Arese, Via Gramsci 53",lat:45.5514,lon:9.0850};
-let MAP=null, MAP_LAYER=null, MAP_ROTTA=null, MP_SEL=new Set();
+let MAP=null, MAP_LAYER=null, MAP_ROTTA=null;
 let GG_PIANO=null;   // ultimo itinerario calcolato per la giornata
 
 const COL_STATO={"Cliente caldo":"#c2571f","Contratto attivo":"#1f7a45","Cliente raffreddamento":"#2b7fb8",
   "Cliente fermo":"#8a8f96","Ex-cliente storico":"#5c6672","Prospect nuovo":"#7b4fa8","Cliente attivo":"#1f7a45"};
-function coloreCliente(c){ return COL_STATO[c.stato_calcolato]||COL_STATO[c.tipologia]||"#5c6672"; }
+function coloreCliente(c){ return stadio(c).col; }
 function conCoord(){ return DATA.filter(c=>typeof c.lat==="number"&&typeof c.lon==="number"); }
 
 // distanza in km fra due punti (formula dell'emisenoverso)
@@ -3057,131 +3393,6 @@ function corridoio(p,a,b){
   t=Math.max(0,Math.min(1,t));
   const proj={lat:ay+t*dy, lon:(ax+t*dx)/k};
   return {t, km:kmTra(p,proj)};
-}
-
-function renderMappa(){
-  const box=document.getElementById('mappa'); if(!box) return;
-  if(typeof L==="undefined"){
-    box.innerHTML='<div class="nota" style="padding:16px">Libreria mappe non caricata: serve connessione a internet al primo accesso.</div>';
-    return;
-  }
-  if(!MAP){
-    MAP=L.map('mappa',{scrollWheelZoom:false}).setView([45.0,10.3],6);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-      maxZoom:18, attribution:'© OpenStreetMap'}).addTo(MAP);
-    MAP.on('click',()=>{});          // il tap sulla mappa non deve selezionare nulla
-    MAP_LAYER=L.layerGroup().addTo(MAP);
-  }
-  // filtri popolati dai dati reali, non da liste fisse
-  const tip=document.getElementById('mp_tip'), prov=document.getElementById('mp_prov');
-  if(tip && tip.options.length<=1){
-    [...new Set(DATA.map(c=>c.stato_calcolato||c.tipologia).filter(Boolean))].sort()
-      .forEach(t=>tip.add(new Option(t,t)));
-  }
-  if(prov && prov.options.length<=1){
-    [...new Set(conCoord().map(c=>c.provincia).filter(Boolean))].sort()
-      .forEach(p=>prov.add(new Option(p,p)));
-  }
-  const mreg=document.getElementById('mp_reg'), mown=document.getElementById('mp_own');
-  if(mreg && mreg.options.length<=1)
-    [...new Set(conCoord().map(c=>c.regione).filter(Boolean))].sort().forEach(r=>mreg.add(new Option(r,r)));
-  if(mown && mown.options.length<=1){
-    [...new Set(conCoord().map(venditoreDi).filter(Boolean))].sort().forEach(v=>mown.add(new Option(v,v)));
-    mown.add(new Option("— senza venditore —","__nessuno"));
-  }
-  const da=document.getElementById('mp_da'), a=document.getElementById('mp_a');
-  if(da && !da.options.length){
-    da.add(new Option(SEDE.nome,"__sede__"));
-    conCoord().sort((x,y)=>String(x.ragione).localeCompare(String(y.ragione),'it'))
-      .forEach(c=>{ da.add(new Option(c.ragione+" ("+(c.comune||"")+")",c.codice));
-                    a.add(new Option(c.ragione+" ("+(c.comune||"")+")",c.codice)); });
-    a.insertBefore(new Option("— scegli la destinazione —",""),a.firstChild);
-    a.value="";
-    const d=document.getElementById('mp_data');
-    if(d && !d.value) d.value=new Date().toISOString().slice(0,10);
-  }
-  ['mp_q','mp_tip','mp_prov','mp_sil','mp_fond','mp_reg','mp_own'].forEach(i=>{
-    const e=document.getElementById(i); if(e && !e._mp){ e._mp=1;
-      e.addEventListener('input',disegnaPunti); e.addEventListener('change',disegnaPunti); }
-  });
-  ['mp_da','mp_a','mp_km','mp_data'].forEach(i=>{
-    const e=document.getElementById(i); if(e && !e._mp){ e._mp=1;
-      e.addEventListener('change',()=>{ MP_SEL.clear(); pianificaMissione(); }); }
-  });
-  // giornata di visite: si apre sul primo giorno con appuntamenti, altrimenti oggi
-  const gd=document.getElementById('gg_data');
-  if(gd && !gd.value){
-    const oggi=new Date().toISOString().slice(0,10);
-    const prossimo=Object.values(ATT)
-      .filter(a=>(a.tipo==='appuntamento'||a.tipo==='visita') && a.data>=oggi && a.codice)
-      .map(a=>a.data).sort()[0];
-    gd.value=prossimo||oggi;
-  }
-  const ga=document.getElementById('gg_area');
-  if(ga && ga.options.length<=1){
-    [...new Set(conCoord().map(c=>c.provincia).filter(Boolean))].sort()
-      .forEach(p=>ga.add(new Option("provincia di "+p,p)));
-  }
-  ['gg_data','gg_ora','gg_fine','gg_dur','gg_pranzo','gg_vel','gg_zona','gg_area'].forEach(i=>{
-    const e=document.getElementById(i); if(e && !e._mp){ e._mp=1;
-      e.addEventListener('change',renderGiornata); }
-  });
-  renderGiornata();
-  disegnaPunti();
-  setTimeout(()=>MAP.invalidateSize(),60);   // il contenitore era nascosto al primo disegno
-}
-
-function filtroMappa(){
-  const g=i=>{const e=document.getElementById(i); return e?e.value:"";};
-  const q=(g('mp_q')||"").toLowerCase().trim();
-  const tip=g('mp_tip'), prov=g('mp_prov'), sil=parseInt(g('mp_sil')||"0",10);
-  const reg=g('mp_reg'), own=g('mp_own');
-  const soloFond=document.getElementById('mp_fond')?.checked;
-  return conCoord().filter(c=>{
-    if(soloFond && !String(c.settore||"").toLowerCase().startsWith('fond')) return false;
-    if(tip && (c.stato_calcolato||c.tipologia)!==tip) return false;
-    if(prov && c.provincia!==prov) return false;
-    if(reg && c.regione!==reg) return false;
-    if(own){ if(own==="__nessuno"){ if(venditoreDi(c)) return false; } else if(venditoreDi(c)!==own) return false; }
-    if(sil && (Number(c.gg_silenzio)||0)<sil) return false;
-    if(q && !((c.ragione||"")+" "+(c.comune||"")+" "+(c.provincia||"")).toLowerCase().includes(q)) return false;
-    return true;
-  });
-}
-
-function iconaCliente(c,sel){
-  const col=coloreCliente(c), approx=(c.geo_prec==="comune");
-  const d=sel?18:13;
-  return L.divIcon({className:"",iconSize:[d,d],iconAnchor:[d/2,d/2],
-    html:`<div class="lmk${approx?' approx':''}${sel?' sel':''}" style="width:${d}px;height:${d}px;background:${col}"></div>`});
-}
-
-function disegnaPunti(){
-  if(!MAP) return;
-  const lista=filtroMappa();
-  MAP_LAYER.clearLayers();
-  lista.forEach(c=>{
-    const m=L.marker([c.lat,c.lon],{icon:iconaCliente(c,MP_SEL.has(c.codice))});
-    const ult=c.cal_ultima||c.data_ultima_azione||"";
-    m.bindPopup(
-      `<b>${esc(c.ragione||"")}</b><br>`+
-      `${esc(c.comune||"")}${c.provincia?" ("+esc(c.provincia)+")":""}`+
-      `${c.geo_prec==="comune"?' <i style="color:#8a6100">posizione approssimata</i>':''}<br>`+
-      `${esc(c.stato_calcolato||c.tipologia||"")}`+
-      `${c.gg_silenzio?" · "+c.gg_silenzio+" gg di silenzio":""}<br>`+
-      `${ult?"Ultima azione: "+esc(String(ult).slice(0,10))+"<br>":""}`+
-      `<a href="#" onclick="openByCod('${c.codice}');return false;">apri scheda</a> · `+
-      `<a href="https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lon}" target="_blank" rel="noopener">indicazioni</a>`);
-    m.addTo(MAP_LAYER);
-  });
-  const cnt=document.getElementById('mp_count');
-  const senza=DATA.length-conCoord().length;
-  if(cnt) cnt.textContent=`${lista.length} aziende in mappa`+
-    (senza?` · ${senza} senza indirizzo utilizzabile`:"");
-  if(lista.length && !MAP._adattata){
-    MAP.fitBounds(L.latLngBounds(lista.map(c=>[c.lat,c.lon])),{padding:[30,30]});
-    MAP._adattata=true;
-  }
 }
 
 // ---------- GIORNATA DI VISITE ----------
@@ -3423,85 +3634,424 @@ function costruisciGiornata(st){
           zonaAuto:!fissi.length && !st.area && !!areaScelta, areaScelta, maxTappe, andataZona};
 }
 
-function renderGiornata(){
+// ---------- Pannelli, pin, filtri ----------
+// Nessun confine regionale scaricato: selezionare una regione inquadra le sue
+// fonderie e nasconde le altre. Costa zero in caricamento, che è la priorità.
+let VIAGGI={};        // giri salvati, condivisi fra i venditori
+let VG=null;          // bozza del giro in costruzione
+let MP_FOCUS=null;    // codice della fonderia selezionata
+
+function altezzaMappa(){
+  const s=document.getElementById('tab-mappa'), n=document.querySelector('nav.tabs');
+  if(s && n) s.style.top=Math.round(n.getBoundingClientRect().bottom)+'px';
+}
+window.addEventListener('resize',()=>{ altezzaMappa(); if(MAP) MAP.invalidateSize(); });
+
+function renderMappa(){
+  const box=document.getElementById('mappa'); if(!box) return;
+  altezzaMappa();
+  if(typeof L==="undefined"){
+    box.innerHTML='<div class="nota" style="padding:16px">Libreria mappe non caricata: serve connessione a internet al primo accesso.</div>';
+    return;
+  }
+  if(!MAP){
+    MAP=L.map('mappa',{zoomControl:true,scrollWheelZoom:true,zoomAnimation:true}).setView([42.6,12.4],6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+      maxZoom:18, attribution:'© OpenStreetMap'}).addTo(MAP);
+    MAP_LAYER=L.layerGroup().addTo(MAP);
+    MAP.on('click',chiudiScheda);
+  }
+  popolaFiltriMappa();
+  legaMappa();
+  renderGiu();
+  disegnaPunti(true);
+  setTimeout(()=>MAP.invalidateSize(),60);
+}
+
+function opzioni(sel,valori,primo){
+  if(!sel) return;
+  const prec=sel.value;
+  sel.innerHTML='';
+  sel.add(new Option(primo,""));
+  valori.forEach(v=>sel.add(new Option(v,v)));
+  if([...sel.options].some(o=>o.value===prec)) sel.value=prec;
+}
+
+function popolaFiltriMappa(){
+  const reg=document.getElementById('mp_reg');
+  if(reg && reg.options.length<=1)
+    opzioni(reg,[...new Set(conCoord().map(c=>c.regione).filter(Boolean))].sort(),"Tutta Italia");
+  aggiornaProvince();
+  const tip=document.getElementById('mp_tip');
+  if(tip && tip.options.length<=1)
+    opzioni(tip,[...new Set(DATA.map(c=>c.stato_calcolato||c.tipologia).filter(Boolean))].sort(),"Tutti gli stati");
+}
+
+// Le province seguono la regione scelta: una tendina con 70 voci non serve a nessuno.
+function aggiornaProvince(){
+  const reg=document.getElementById('mp_reg'), prov=document.getElementById('mp_prov');
+  if(!prov) return;
+  const base=conCoord().filter(c=>!reg||!reg.value||c.regione===reg.value);
+  opzioni(prov,[...new Set(base.map(c=>c.provincia).filter(Boolean))].sort(),"Tutte le province");
+}
+
+function legaMappa(){
+  const una=(id,ev,fn)=>{const e=document.getElementById(id); if(e&&!e._mp){e._mp=1;e.addEventListener(ev,fn);}};
+  una('mp_q','input',()=>disegnaPunti());
+  una('mp_reg','change',()=>{ aggiornaProvince(); disegnaPunti(true); });
+  ['mp_prov','mp_tip','mp_sil'].forEach(i=>una(i,'change',()=>disegnaPunti(true)));
+  una('mp_fond','change',()=>disegnaPunti());
+  una('mp_tfiltri','click',()=>{
+    const b=document.getElementById('mp_tfiltri'), p=document.getElementById('mp_altri');
+    p.classList.toggle('hidden'); b.classList.toggle('on',!p.classList.contains('hidden'));
+  });
+  una('mp_nuovo','click',vgNuovo);
+  una('mp_dx_tab','click',alternaScheda);
+  una('mp_maniglia','click',()=>{
+    document.getElementById('mp_giu').classList.toggle('aperto');
+  });
+}
+
+function filtroMappa(){
   const g=i=>{const e=document.getElementById(i); return e?e.value:"";};
-  const esito=document.getElementById('gg_esito'), tab=document.getElementById('gg_tappe'),
-        az=document.getElementById('gg_azioni'), ws=document.getElementById('gg_wrap_scarti'),
-        ts=document.getElementById('gg_scarti');
-  if(!esito) return;
-  const data=g('gg_data');
-  if(!data){ esito.innerHTML='<div class="nota">Scegli un giorno.</div>'; tab.innerHTML=''; az.innerHTML=''; ts.innerHTML=''; return; }
-  // tappe obbligate: appuntamenti e visite già a calendario per quel giorno
-  const fissi=Object.values(ATT)
-    .filter(a=>a.data===data && (a.tipo==='appuntamento'||a.tipo==='visita') && a.codice)
-    .map(a=>{ const c=DATA.find(x=>x.codice===a.codice);
-              return (c && typeof c.lat==="number") ? Object.assign({},c,{ora:a.ora||null,attId:a.id}) : null; })
+  const q=(g('mp_q')||"").toLowerCase().trim();
+  const tip=g('mp_tip'), prov=g('mp_prov'), sil=parseInt(g('mp_sil')||"0",10);
+  const reg=g('mp_reg'), own=VEND_SEL;
+  const soloFond=document.getElementById('mp_fond')?.checked;
+  return conCoord().filter(c=>{
+    if(soloFond && !String(c.settore||"").toLowerCase().startsWith('fond')) return false;
+    if(tip && (c.stato_calcolato||c.tipologia)!==tip) return false;
+    if(prov && c.provincia!==prov) return false;
+    if(reg && c.regione!==reg) return false;
+    if(own){ if(own==="__nessuno"){ if(venditoreDi(c)) return false; } else if(venditoreDi(c)!==own) return false; }
+    if(sil && (Number(c.gg_silenzio)||0)<sil) return false;
+    if(q && !((c.ragione||"")+" "+(c.comune||"")+" "+(c.provincia||"")).toLowerCase().includes(q)) return false;
+    return true;
+  }).sort((a,b)=>String(a.ragione).localeCompare(String(b.ragione),'it'));
+}
+
+function iconaCliente(c,sel,tappa){
+  const col=coloreCliente(c), approx=(c.geo_prec==="comune"), d=sel?16:12;
+  return L.divIcon({className:"pin-wrap"+(tappa?" tappa":""),iconSize:[d,d],iconAnchor:[d/2,d/2],
+    html:`<div class="pin${approx?' approx':''}${sel?' sel':''}" `+
+         `style="width:${d}px;height:${d}px;background:${col}"></div>`+
+         `<div class="pin-nome">${esc(c.ragione||"")}</div>`});
+}
+
+function disegnaPunti(inquadra){
+  if(!MAP) return;
+  const lista=filtroMappa();
+  const tappe=new Set((VG&&VG.piano?VG.piano.tappe:[]).map(t=>t.codice));
+  MAP_LAYER.clearLayers();
+  lista.forEach(c=>{
+    L.marker([c.lat,c.lon],{icon:iconaCliente(c,MP_FOCUS===c.codice,tappe.has(c.codice)),
+      riseOnHover:true, title:c.ragione||""})
+     .on('click',ev=>{ L.DomEvent.stop(ev); apriScheda(c.codice); })
+     .addTo(MAP_LAYER);
+  });
+  const cnt=document.getElementById('mp_conta');
+  const senza=DATA.length-conCoord().length;
+  if(cnt) cnt.textContent=`${lista.length} aziende`+(senza?` · ${senza} senza indirizzo`:"");
+  renderListaMappa(lista);
+  if(inquadra && lista.length){
+    MAP.flyToBounds(L.latLngBounds(lista.map(c=>[c.lat,c.lon])),
+      {padding:[40,40],maxZoom:11,duration:.6});
+  }
+}
+
+function renderListaMappa(lista){
+  const el=document.getElementById('mp_lista'); if(!el) return;
+  if(!lista.length){ el.innerHTML='<div class="mp-conta">Nessuna azienda con questi filtri.</div>'; return; }
+  el.innerHTML=lista.map(c=>`<div class="mp-riga${MP_FOCUS===c.codice?' sel':''}" data-cod="${c.codice}">
+    <span class="pal" style="background:${coloreCliente(c)}"></span>
+    <span style="min-width:0"><b>${esc(c.ragione||"")}</b>
+      <i>${esc(c.comune||"")}${c.provincia?" ("+esc(c.provincia)+")":""}${
+        c.gg_silenzio?" · "+c.gg_silenzio+" gg":""}</i></span>
+    ${VG?`<button class="agg" data-agg="${c.codice}" title="Aggiungi al giro">+</button>`:''}
+  </div>`).join("");
+  el.querySelectorAll('.mp-riga').forEach(r=>r.onclick=e=>{
+    if(e.target.dataset.agg){ vgAggiungi(e.target.dataset.agg); return; }
+    apriScheda(r.dataset.cod);
+  });
+}
+
+// ---------- scheda azienda, entra da destra ----------
+function apriScheda(cod){
+  const c=DATA.find(x=>x.codice===cod); if(!c) return;
+  MP_FOCUS=cod;
+  const dx=document.getElementById('mp_dx'), corpo=document.getElementById('mp_dx_corpo');
+  const ult=c.cal_ultima||c.data_ultima_azione||"";
+  corpo.innerHTML=`<h4>${esc(c.ragione||"")}</h4>
+    <div class="sotto">${esc(c.comune||"")}${c.provincia?" ("+esc(c.provincia)+")":""}${
+      c.regione?" · "+esc(c.regione):""}${c.geo_prec==="comune"?' · <i>posizione approssimata</i>':''}</div>
+    <div class="mp-kv">
+      <div><div class="l">Stato</div><div class="v">${esc(stadio(c).t)}</div></div>
+      <div><div class="l">Venditore</div><div class="v">${esc(venditoreDi(c)||"—")}</div></div>
+      <div><div class="l">Silenzio</div><div class="v">${c.gg_silenzio?c.gg_silenzio+" gg":"—"}</div></div>
+      <div><div class="l">Esposizione</div><div class="v">${c.esposizione?nf(c.esposizione,0)+" €":"—"}</div></div>
+      <div><div class="l">Contratti aperti</div><div class="v">${c.contratti_aperti||0}</div></div>
+      <div><div class="l">Ultima azione</div><div class="v">${ult?esc(String(ult).slice(0,10)):"—"}</div></div>
+    </div>
+    ${(()=>{const p=prossimoPasso(c);
+      if(!p) return `<div class="pp manca">Nessun prossimo passo fissato</div>`;
+      const q=p.scaduto?'tardi':(p.giorni<=7?'vicino':'');
+      return `<div class="pp ${q}"><b>${dataBreve(p.data)}</b> ${esc(p.testo)}
+        <span class="pmeta">${p.scaduto?'in ritardo di '+(-p.giorni)+' gg':(p.giorni===0?'oggi':'fra '+p.giorni+' gg')}</span></div>`;})()}
+    <div class="mp-azioni">
+      ${VG?`<button id="mp_a_dest">Imposta come destinazione del giro</button>
+            <button id="mp_a_tappa">Aggiungi come tappa</button>`
+          :`<button id="mp_a_nuovo">Crea un giro che arriva qui</button>`}
+      <button id="mp_a_scheda">Apri la scheda completa</button>
+      <button id="mp_a_nav">Indicazioni stradali</button>
+    </div>`;
+  document.getElementById('mp_dx_eti').textContent=c.ragione||"Scheda azienda";
+  dx.classList.add('aperta');
+  document.getElementById('tab-mappa').classList.add('scheda');
+  document.getElementById('mp_a_scheda').onclick=()=>openByCod(cod);
+  document.getElementById('mp_a_nav').onclick=()=>window.open(
+    `https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lon}`,'_blank','noopener');
+  const bd=document.getElementById('mp_a_dest'), bt=document.getElementById('mp_a_tappa'),
+        bn=document.getElementById('mp_a_nuovo');
+  if(bd) bd.onclick=()=>vgDestinazione(cod);
+  if(bt) bt.onclick=()=>vgAggiungi(cod);
+  if(bn) bn.onclick=()=>{ vgNuovo(); vgDestinazione(cod); };
+  disegnaPunti();
+}
+// Chiudere non significa svuotare: la scheda si ritira dietro la linguetta e
+// resta pronta a riaprirsi sull'ultima azienda guardata.
+function chiudiScheda(){
+  MP_FOCUS=null;
+  const dx=document.getElementById('mp_dx');
+  if(dx) dx.classList.remove('aperta');
+  const sz=document.getElementById('tab-mappa'); if(sz) sz.classList.remove('scheda');
+  disegnaPunti();
+}
+function alternaScheda(){
+  const dx=document.getElementById('mp_dx'); if(!dx) return;
+  if(dx.classList.contains('aperta')){ chiudiScheda(); return; }
+  if(!document.getElementById('mp_dx_corpo').innerHTML.trim()) return;  // non c'è ancora nulla
+  dx.classList.add('aperta');
+  document.getElementById('tab-mappa').classList.add('scheda');
+}
+
+// ---------- GIRI DI VISITE ----------
+// La bozza vive in memoria finché non la salvi: il giro salvato è condiviso con
+// gli altri venditori e finisce su Dropbox, non nel browser.
+function giornoProposto(){
+  const oggi=new Date().toISOString().slice(0,10);
+  return Object.values(ATT)
+    .filter(a=>(a.tipo==='appuntamento'||a.tipo==='visita') && a.data>=oggi && a.codice)
+    .map(a=>a.data).sort()[0] || oggi;
+}
+
+function vgNuovo(){
+  VG={id:null,nome:"",data:giornoProposto(),ora:"08:00",fine:"19:00",durata:60,pranzo:60,
+      vel:65,zona:45,dest:null,extra:[],piano:null};
+  document.getElementById('mp_giu').classList.add('aperto');
+  vgCalcola();
+}
+function vgChiudi(){ VG=null; renderGiu(); disegnaPunti(); }
+
+function vgDestinazione(cod){
+  if(!VG) vgNuovo();
+  VG.dest=cod;
+  VG.extra=VG.extra.filter(x=>x!==cod);
+  vgCalcola();
+}
+function vgAggiungi(cod){
+  if(!VG) vgNuovo();
+  if(VG.dest===cod || VG.extra.includes(cod)) return;
+  VG.extra.push(cod);
+  vgCalcola();
+}
+function vgTogli(cod){
+  if(!VG) return;
+  if(VG.dest===cod) VG.dest=null; else VG.extra=VG.extra.filter(x=>x!==cod);
+  vgCalcola();
+}
+
+// Costruisce l'itinerario con i vincoli già collaudati (logica di zona, un'ora a
+// visita, pausa pranzo, niente prima delle 9:30 né dopo le 17:00).
+function vgCalcola(){
+  if(!VG) return;
+  const vis=c=>{ const x=DATA.find(y=>y.codice===c); return (x&&typeof x.lat==="number")?x:null; };
+  const daCal=Object.values(ATT)
+    .filter(a=>a.data===VG.data && (a.tipo==='appuntamento'||a.tipo==='visita') && a.codice)
+    .map(a=>{ const c=vis(a.codice); return c?Object.assign({},c,{ora:a.ora||null,attId:a.id}):null; })
     .filter(Boolean);
-  const st={inizio:daOra(g('gg_ora'))??8*60, fine:daOra(g('gg_fine'))??19*60,
-            durata:parseInt(g('gg_dur')||"60",10), pranzo:parseInt(g('gg_pranzo')||"60",10),
-            vel:parseFloat(g('gg_vel')||"65"), zona:parseFloat(g('gg_zona')||"45"),
-            area:g('gg_area')||"", max:8, fissi};
-  const r=costruisciGiornata(st);
-  GG_PIANO=r;
-  if(r.errore){
-    esito.innerHTML='<div class="avviso warn">'+esc(r.errore)+'</div>';
-    tab.innerHTML=''; az.innerHTML=''; ts.innerHTML=''; return;
+  const manuali=[VG.dest,...VG.extra].filter(Boolean)
+    .filter(cod=>!daCal.some(f=>f.codice===cod))
+    .map(cod=>{ const c=vis(cod); return c?Object.assign({},c,{ora:null,manuale:true}):null; })
+    .filter(Boolean);
+  const st={inizio:daOra(VG.ora)??8*60, fine:daOra(VG.fine)??19*60,
+            durata:VG.durata, pranzo:VG.pranzo, vel:VG.vel, zona:VG.zona,
+            area:"", max:8, fissi:daCal.concat(manuali)};
+  VG.piano=costruisciGiornata(st);
+  GG_PIANO=VG.piano;
+  renderGiu();
+  disegnaRotta(VG.piano);
+  disegnaPunti();
+}
+
+function disegnaRotta(p){
+  if(!MAP) return;
+  if(MAP_ROTTA){ MAP.removeLayer(MAP_ROTTA); MAP_ROTTA=null; }
+  if(!p || p.errore || !p.tappe || !p.tappe.length) return;
+  MAP_ROTTA=L.polyline([[SEDE.lat,SEDE.lon],...p.tappe.map(x=>[x.lat,x.lon]),[SEDE.lat,SEDE.lon]],
+    {color:"#1f7a45",weight:3,opacity:.75}).addTo(MAP);
+}
+
+function kmGiro(tappe){
+  let k=0,p=SEDE; tappe.forEach(x=>{k+=kmTra(p,x)*TORTUOSITA;p=x;});
+  return k+kmTra(p,SEDE)*TORTUOSITA;
+}
+
+function renderGiu(){
+  const tit=document.getElementById('mp_giu_tit'), corpo=document.getElementById('mp_giu_corpo');
+  if(!corpo) return;
+  const salvati=Object.values(VIAGGI).sort((a,b)=>String(b.data).localeCompare(String(a.data)));
+  tit.textContent=VG?(VG.id?"Modifica del giro":"Nuovo giro di visite")
+                    :`Giri di visite${salvati.length?" · "+salvati.length:""}`;
+  corpo.innerHTML=(VG?vgComposer():"")+
+    (salvati.length?`<h4 class="dh4" style="margin:${VG?'16px':'0'} 0 8px">Giri salvati</h4>
+      <div class="vg-grid">`+salvati.map(cardViaggio).join("")+`</div>`
+     :(VG?"":'<div class="mp-conta">Nessun giro salvato. Premi “+ Nuovo giro di visite”.</div>'));
+  legaGiu();
+}
+
+function vgComposer(){
+  const p=VG.piano;
+  const nome=c=>{const x=DATA.find(y=>y.codice===c); return x?x.ragione:c;};
+  const dest=VG.dest?`<span class="badge ok">${esc(nome(VG.dest))}</span>
+      <button class="agg" data-togli="${VG.dest}" title="togli">×</button>`
+    :'<i class="who">clicca un pin sulla mappa o una riga in elenco</i>';
+  let esito='';
+  if(p && p.errore) esito=`<div class="avviso warn">${esc(p.errore)}</div>`;
+  else if(p){
+    esito=`<div class="nota"><b>${p.tappe.length} tappe</b> · partenza ${esc(VG.ora)} da Arese ·
+      rientro <b>${hhmm(p.rientro)}</b> · circa <b>${nf(kmGiro(p.tappe),0)} km</b>.
+      ${p.zonaTot?`Zona di <b>${esc((p.zonaNomi||[]).join(', '))}</b>: ${p.inZonaMesse} inserite su ${p.zonaTot}.`:''}
+      Tetto di ${p.maxTappe} visite, nessuna prima delle 9:30 né dopo le 17:00.</div>
+      <div class="vg-tappe" style="margin-top:8px">`+
+      p.tappe.map(x=>`<div><span class="ora">${hhmm(x.arrivo)}</span>
+        <span style="flex:1"><b>${esc(x.ragione||"")}</b>
+          <span class="who">${esc(x.comune||"")}${x.fisso?' · fissato':''}${x.tirato?' · tirata':''}</span></span>
+        <button class="agg" data-togli="${x.codice}" title="togli">×</button></div>`).join("")+
+      `<div><span class="ora">${hhmm(p.rientro)}</span><span><i>rientro in sede</i></span></div></div>`;
+    if(p.scarti && p.scarti.length){
+      esito+=`<h4 class="dh4" style="margin:12px 0 6px">Se avanza tempo</h4><div class="vg-tappe">`+
+        p.scarti.slice(0,8).map(({c,km,costo})=>`<div>
+          <span class="ora">${costo==null?'—':'+'+costo+"'"}</span>
+          <span style="flex:1">${esc(c.ragione||"")} <span class="who">${esc(c.comune||"")} · ${nf(km,0)} km</span></span>
+          <button class="agg" data-agg2="${c.codice}" title="aggiungi">+</button></div>`).join("")+`</div>`;
+    }
   }
-  const kmTot=(()=>{ let k=0,p=SEDE; r.tappe.forEach(x=>{k+=kmTra(p,x)*TORTUOSITA;p=x;}); return k+kmTra(p,SEDE)*TORTUOSITA; })();
-  esito.innerHTML=`<div class="nota">
-    <b>${r.tappe.length} tappe</b> · partenza ${esc(g('gg_ora'))} da ${esc(SEDE.nome)} ·
-    rientro stimato <b>${hhmm(r.rientro)}</b> · circa <b>${nf(kmTot,0)} km</b>.
-    ${fissi.length?`${fissi.length} ${fissi.length===1?'appuntamento già fissato':'appuntamenti già fissati'}, `:''}${r.aggiunte} aggiunte dal sistema.
-    ${r.zonaTot?`<br>Zona${r.zonaAuto?' scelta dal sistema':''} di <b>${esc((r.zonaNomi||[]).join(', '))}</b>: ${r.zonaTot} fonderie entro
-      ${r.zonaKm} km o nella stessa provincia, <b>${r.inZonaMesse} inserite</b>${
-      r.aggiunte>r.inZonaMesse?`; le altre ${r.aggiunte-r.inZonaMesse} sono sulla via del ritorno`:''}.`:''}
-    <br>Tetto di <b>${r.maxTappe} visite</b>${r.andataZona>90?' perché è una trasferta':' essendo zona vicina'},
-    nessuna prima delle 9:30 né dopo le 17:00.
-    I tempi sono stimati su distanza e velocità media, non su traffico reale.</div>`;
-  tab.innerHTML=`<thead><tr><th class="n">Arrivo</th><th>Azienda</th><th>Dove</th><th>Stato</th>
-      <th class="n">gg sil.</th><th>Perché</th></tr></thead><tbody>`+
-    r.tappe.map(x=>`<tr class="${x.fisso?'sel':''}">
-      <td class="n">${hhmm(x.arrivo)}</td>
-      <td><a href="#" onclick="openByCod('${x.codice}');return false;">${esc(x.ragione||"")}</a>
-        ${x.fisso?' <span class="badge neutro">fissato</span>':''}${x.tirato?' <span class="badge warn">tirata</span>':''}
-        ${x.geo_prec==="comune"?' <span class="badge warn">posizione approssimata</span>':''}</td>
-      <td>${esc(x.comune||"")}${x.provincia?" ("+esc(x.provincia)+")":""}</td>
-      <td>${esc(x.stato_calcolato||x.tipologia||"")}</td>
-      <td class="n">${x.gg_silenzio||"—"}</td>
-      <td>${x.fisso?'appuntamento in calendario'
-            :(x.zona?'<span class="badge ok">in zona</span> '
-              :(r.zonaTot?'<span class="badge neutro">rientro</span> ':''))+esc(motivoVisita(x))}</td></tr>`).join("")+
-    `<tr><td class="n">${hhmm(r.rientro)}</td><td colspan="5"><i>rientro in sede</i></td></tr></tbody>`;
-  const nuove=r.tappe.filter(x=>!x.fisso);
-  az.innerHTML=`<button class="primario" id="gg_gmaps">Apri il giro in Google Maps</button>
-    <button id="gg_cal"${nuove.length?'':' disabled'}>Metti in calendario le ${nuove.length} tappe nuove</button>
-    <span class="who" id="gg_msg"></span>`;
-  document.getElementById('gg_gmaps').onclick=()=>{
-    const wp=r.tappe.map(x=>`${x.lat},${x.lon}`).join('|');
-    window.open(`https://www.google.com/maps/dir/?api=1&origin=${SEDE.lat},${SEDE.lon}`+
-      `&destination=${SEDE.lat},${SEDE.lon}&waypoints=${encodeURIComponent(wp)}&travelmode=driving`,'_blank','noopener');
-  };
-  const cal=document.getElementById('gg_cal');
-  if(cal) cal.onclick=()=>creaVisiteOrario(nuove,data);
-  ts.innerHTML=`<thead><tr><th>Azienda</th><th>Dove</th><th>Stato</th>
-      <th class="n">km</th><th class="n">ti costa</th><th>Effetto</th></tr></thead><tbody>`+
-    (r.scarti.length?r.scarti.map(({c,km,costo,zona,sforo})=>`<tr>
-      <td><a href="#" onclick="openByCod('${c.codice}');return false;">${esc(c.ragione||"")}</a>
-        ${zona?' <span class="badge ok">in zona</span>':''}</td>
-      <td>${esc(c.comune||"")}${c.provincia?" ("+esc(c.provincia)+")":""}</td>
-      <td>${esc(c.stato_calcolato||c.tipologia||"")}</td>
-      <td class="n">${nf(km,0)}</td>
-      <td class="n">${costo==null?'—':'+'+costo+' min'}</td>
-      <td>${costo==null?'non incastrabile oggi'
-            :(costo<=5?'riempie un\'attesa fra due appuntamenti'
-            :(sforo?`rientro alle ${hhmm(r.rientro+costo)}`:'ci sta nella giornata'))}</td></tr>`).join("")
-    :'<tr><td colspan="6">Nessun\'altra fonderia raggiungibile con i filtri attivi.</td></tr>')+`</tbody>`;
-  // la rotta del giorno disegnata sulla mappa
-  if(MAP){
-    if(MAP_ROTTA) MAP.removeLayer(MAP_ROTTA);
-    MAP_ROTTA=L.polyline([[SEDE.lat,SEDE.lon],...r.tappe.map(x=>[x.lat,x.lon]),[SEDE.lat,SEDE.lon]],
-      {color:"#1f7a45",weight:3,opacity:.8}).addTo(MAP);
+  const nuove=p&&!p.errore?p.tappe.filter(x=>!x.fisso).length:0;
+  return `<div class="vg-card corrente">
+    <div class="mpplan" style="padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px">
+      <div><label class="fl">Nome del giro</label><input class="fi" id="vg_nome" value="${esc(VG.nome)}" placeholder="es. Emilia · 27 novembre"></div>
+      <div><label class="fl">Giorno</label><input class="fi" id="vg_data" type="date" value="${esc(VG.data)}"></div>
+      <div><label class="fl">Partenza</label><input class="fi" id="vg_ora" type="time" value="${esc(VG.ora)}"></div>
+      <div><label class="fl">Rientro entro</label><input class="fi" id="vg_fine" type="time" value="${esc(VG.fine)}"></div>
+      <div><label class="fl">Durata visita</label><select class="fi" id="vg_dur">
+        ${[45,60,90,120].map(v=>`<option value="${v}"${VG.durata==v?' selected':''}>${v} min</option>`).join("")}</select></div>
+      <div><label class="fl">Pausa pranzo</label><select class="fi" id="vg_pranzo">
+        ${[0,45,60].map(v=>`<option value="${v}"${VG.pranzo==v?' selected':''}>${v?v+" min":"nessuna"}</option>`).join("")}</select></div>
+      <div><label class="fl">Velocità media</label><select class="fi" id="vg_vel">
+        ${[55,65,80].map(v=>`<option value="${v}"${VG.vel==v?' selected':''}>${v} km/h</option>`).join("")}</select></div>
+      <div><label class="fl">Zona attorno</label><select class="fi" id="vg_zona">
+        ${[25,45,70,100].map(v=>`<option value="${v}"${VG.zona==v?' selected':''}>${v} km</option>`).join("")}</select></div>
+    </div>
+    <div style="margin:10px 0 2px"><span class="fl">Destinazione</span> ${dest}</div>
+    ${esito}
+    <div class="vg-acts">
+      <button class="primo" id="vg_salva">${VG.id?"Salva le modifiche":"Salva il giro"}</button>
+      <button id="vg_gmaps"${p&&!p.errore&&p.tappe.length?"":" disabled"}>Apri in Google Maps</button>
+      <button id="vg_cal"${nuove?"":" disabled"}>Metti in calendario le ${nuove} tappe nuove</button>
+      <button id="vg_annulla">Chiudi senza salvare</button>
+      <span class="who" id="vg_msg"></span>
+    </div></div>`;
+}
+
+function cardViaggio(v){
+  const mio=(v.creatoDa||"").toLowerCase()===String(USER||"").toLowerCase();
+  return `<div class="vg-card" data-vg="${v.id}">
+    <h5>${esc(v.nome||("Giro del "+v.data))}</h5>
+    <div class="meta">${esc(v.data)} · ${(v.tappe||[]).length} tappe · ${
+      v.km?nf(v.km,0)+" km · ":""}${esc(mio?"tuo":(v.creatoDa||""))}</div>
+    <div class="vg-tappe">${(v.tappe||[]).map(t=>`<div><span class="ora">${esc(t.ora||"")}</span>
+      <span>${esc(t.ragione||"")}</span></div>`).join("")}</div>
+    <div class="vg-acts">
+      <button data-apri="${v.id}">Google Maps</button>
+      <button data-mod="${v.id}">Modifica</button>
+      <button data-del="${v.id}">Elimina</button>
+    </div></div>`;
+}
+
+function legaGiu(){
+  const corpo=document.getElementById('mp_giu_corpo'); if(!corpo) return;
+  if(VG){
+    const campo=(id,k,num)=>{ const e=document.getElementById(id); if(!e) return;
+      e.onchange=()=>{ VG[k]=num?parseFloat(e.value):e.value; if(k!=='nome') vgCalcola(); }; };
+    campo('vg_nome','nome'); campo('vg_data','data'); campo('vg_ora','ora'); campo('vg_fine','fine');
+    campo('vg_dur','durata',1); campo('vg_pranzo','pranzo',1); campo('vg_vel','vel',1); campo('vg_zona','zona',1);
+    corpo.querySelectorAll('[data-togli]').forEach(b=>b.onclick=()=>vgTogli(b.dataset.togli));
+    corpo.querySelectorAll('[data-agg2]').forEach(b=>b.onclick=()=>vgAggiungi(b.dataset.agg2));
+    const sv=document.getElementById('vg_salva'); if(sv) sv.onclick=vgSalva;
+    const an=document.getElementById('vg_annulla'); if(an) an.onclick=vgChiudi;
+    const gm=document.getElementById('vg_gmaps');
+    if(gm) gm.onclick=()=>apriGmaps((VG.piano&&VG.piano.tappe)||[]);
+    const cl=document.getElementById('vg_cal');
+    if(cl) cl.onclick=()=>creaVisiteOrario((VG.piano.tappe||[]).filter(x=>!x.fisso),VG.data,VG.durata);
   }
+  corpo.querySelectorAll('[data-apri]').forEach(b=>b.onclick=()=>{
+    const v=VIAGGI[b.dataset.apri]; apriGmaps(v.tappe||[]); });
+  corpo.querySelectorAll('[data-mod]').forEach(b=>b.onclick=()=>vgCarica(b.dataset.mod));
+  corpo.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>vgElimina(b.dataset.del));
+}
+
+function apriGmaps(tappe){
+  if(!tappe.length) return;
+  const wp=tappe.map(x=>`${x.lat},${x.lon}`).join('|');
+  window.open(`https://www.google.com/maps/dir/?api=1&origin=${SEDE.lat},${SEDE.lon}`+
+    `&destination=${SEDE.lat},${SEDE.lon}&waypoints=${encodeURIComponent(wp)}&travelmode=driving`,
+    '_blank','noopener');
+}
+
+async function vgSalva(){
+  if(!VG) return;
+  const msg=document.getElementById('vg_msg');
+  const p=VG.piano;
+  if(!p || p.errore || !p.tappe.length){ msg.textContent="Non c'è un itinerario da salvare."; return; }
+  msg.textContent="Salvo…";
+  const fields={ nome:VG.nome||("Giro del "+VG.data), data:VG.data, ora:VG.ora, fine:VG.fine,
+    durata:VG.durata, pranzo:VG.pranzo, vel:VG.vel, zona:VG.zona,
+    dest:VG.dest, extra:VG.extra, km:Math.round(kmGiro(p.tappe)), rientro:hhmm(p.rientro),
+    tappe:p.tappe.map(x=>({codice:x.codice,ragione:x.ragione,comune:x.comune,provincia:x.provincia,
+      lat:x.lat,lon:x.lon,ora:hhmm(x.arrivo),fisso:!!x.fisso})) };
+  const {ok,j}=await apiPost('/viaggio',{id:VG.id,fields});
+  if(ok && j.viaggio){
+    VIAGGI[j.viaggio.id]=j.viaggio;
+    VG=null;
+    renderGiu();
+  } else msg.textContent=(j&&j.error)||"Salvataggio non riuscito.";
+}
+
+function vgCarica(id){
+  const v=VIAGGI[id]; if(!v) return;
+  VG={id:v.id,nome:v.nome||"",data:v.data,ora:v.ora||"08:00",fine:v.fine||"19:00",
+      durata:v.durata||60,pranzo:v.pranzo==null?60:v.pranzo,vel:v.vel||65,zona:v.zona||45,
+      dest:v.dest||null,extra:(v.extra||[]).slice(),piano:null};
+  document.getElementById('mp_giu').classList.add('aperto');
+  vgCalcola();
+}
+
+async function vgElimina(id){
+  const v=VIAGGI[id]; if(!v) return;
+  if(!confirm(`Elimino il giro "${v.nome||v.data}"?`)) return;
+  const {ok}=await apiPost('/viaggio-delete',{id});
+  if(ok){ delete VIAGGI[id]; if(VG&&VG.id===id) VG=null; renderGiu(); }
+  else alert("Eliminazione non riuscita.");
 }
 
 function motivoVisita(c){
@@ -3510,14 +4060,14 @@ function motivoVisita(c){
   if(c.stato_calcolato==='Cliente caldo') p.push("offerta recente");
   if((Number(c.gg_silenzio)||0)>=90) p.push(c.gg_silenzio+" gg senza contatti");
   else if((Number(c.gg_silenzio)||0)>=30) p.push("silenzio da "+c.gg_silenzio+" gg");
-  if(c.esposizione_corrente>0) p.push("esposizione aperta");
+  if(c.esposizione>0) p.push("esposizione aperta");
   return p.length?p.join(", "):"vicina al percorso";
 }
 
 // Mette a calendario le tappe con l'orario calcolato, saltando chi c'è già.
-async function creaVisiteOrario(tappe,data){
-  const msg=document.getElementById('gg_msg');
-  msg.textContent="Creazione in corso…";
+async function creaVisiteOrario(tappe,data,durata){
+  const msg=document.getElementById('vg_msg');
+  if(msg) msg.textContent="Creazione in corso…";
   let fatte=0,saltate=0;
   for(const c of tappe){
     const gia=Object.values(ATT).some(x=>x.codice===c.codice && x.data===data &&
@@ -3526,14 +4076,14 @@ async function creaVisiteOrario(tappe,data){
     const {ok,j}=await apiPost('/attivita',{id:null,fields:{
       tipo:"visita", codice:c.codice, cliente:c.ragione||"",
       titolo:"Visita · giro del "+data, data, ora:hhmm(c.arrivo),
-      durata_min:parseInt(document.getElementById('gg_dur').value||"60",10),
+      durata_min:durata||60,
       owner:USER, luogo:[c.comune,c.provincia].filter(Boolean).join(" ("),
       note:"Tappa del giro pianificato dalla mappa. "+motivoVisita(c)}});
     if(ok&&j.attivita){ ATT[j.attivita.id]=j.attivita; fatte++; }
   }
-  msg.textContent=`${fatte} visite create${saltate?`, ${saltate} già presenti`:''}.`;
+  if(msg) msg.textContent=`${fatte} visite create${saltate?`, ${saltate} già presenti`:''}.`;
   await dopoModifica('cal');
-  renderGiornata();
+  if(VG) vgCalcola();
 }
 
 // Costanti e funzioni pure della mappa, esposte perché i test di regressione
@@ -3542,91 +4092,8 @@ Object.assign(window,{SEDE,TORTUOSITA,TOLLERANZA,APERTURA,CHIUSURA,MATTINA,TAPPE
 // Iniezione dei dati per i test: DATA e ATT sono binding lessicali, assegnarli
 // dall'esterno con window.DATA non li toccherebbe. In produzione non si usa.
 window.__setDati=(d,a)=>{ if(d) DATA=d; if(a) ATT=a; };
-window.__dati=()=>({DATA,ATT,DOCS,OFF,INTER,NOTIF});
-
-function puntoDa(valore){
-  if(valore==="__sede__") return {codice:null,ragione:SEDE.nome,lat:SEDE.lat,lon:SEDE.lon};
-  return DATA.find(c=>c.codice===valore)||null;
-}
-
-function pianificaMissione(){
-  const g=i=>{const e=document.getElementById(i); return e?e.value:"";};
-  const a=puntoDa(g('mp_da')), b=puntoDa(g('mp_a'));
-  const raggio=parseFloat(g('mp_km')||"20");
-  const box=document.getElementById('mp_rotta'), tab=document.getElementById('mp_tappe'),
-        az=document.getElementById('mp_azioni');
-  if(!a||!b){ box.innerHTML=''; tab.innerHTML=''; az.innerHTML=''; disegnaPunti(); return; }
-  const dirette=kmTra(a,b);
-  const cand=filtroMappa()
-    .filter(c=>c.codice!==a.codice && c.codice!==b.codice)
-    .map(c=>Object.assign({},c,corridoio(c,a,b)))
-    .filter(c=>c.km<=raggio)
-    .sort((x,y)=>x.t-y.t);
-  box.innerHTML=`<div class="nota"><b>${esc(a.ragione)}</b> → <b>${esc(b.ragione)}</b> ·
-    ${nf(dirette,0)} km in linea d'aria · ${cand.length} aziende entro ${raggio} km dalla rotta.
-    La distanza è calcolata in linea d'aria: serve a capire chi è sulla strada, non a stimare i tempi.</div>`;
-  tab.innerHTML=`<thead><tr><th></th><th>Azienda</th><th>Dove</th><th>Stato</th>
-      <th class="n">gg sil.</th><th class="n">dalla rotta</th></tr></thead><tbody>`+
-    (cand.length?cand.map(c=>`<tr>
-      <td><input type="checkbox" data-cod="${c.codice}"${MP_SEL.has(c.codice)?' checked':''}></td>
-      <td><a href="#" onclick="openByCod('${c.codice}');return false;">${esc(c.ragione||"")}</a>
-        ${c.geo_prec==="comune"?' <span class="badge warn">approx</span>':''}</td>
-      <td>${esc(c.comune||"")}${c.provincia?" ("+esc(c.provincia)+")":""}</td>
-      <td>${esc(c.stato_calcolato||c.tipologia||"")}</td>
-      <td class="n">${c.gg_silenzio||"—"}</td>
-      <td class="n">${nf(c.km,1)} km</td></tr>`).join("")
-     :`<tr><td colspan="6">Nessuna azienda entro ${raggio} km dalla rotta con i filtri attivi.</td></tr>`)+`</tbody>`;
-  tab.querySelectorAll('input[type=checkbox]').forEach(ch=>ch.onchange=()=>{
-    ch.checked?MP_SEL.add(ch.dataset.cod):MP_SEL.delete(ch.dataset.cod);
-    pianificaMissione();
-  });
-  // rotta e tappe sulla mappa
-  if(MAP_ROTTA) MAP.removeLayer(MAP_ROTTA);
-  const scelte=cand.filter(c=>MP_SEL.has(c.codice));
-  MAP_ROTTA=L.polyline([[a.lat,a.lon],...scelte.map(c=>[c.lat,c.lon]),[b.lat,b.lon]],
-    {color:"#26578a",weight:3,opacity:.75,dashArray:"6 5"});
-  MAP_ROTTA.addTo(MAP);
-  disegnaPunti();
-  const n=scelte.length;
-  az.innerHTML=`<button class="primario" id="mp_gmaps"${n?'':' disabled'}>Apri in Google Maps${n?` (${n+2} tappe)`:''}</button>
-    <button id="mp_cal"${n?'':' disabled'}>Metti in calendario${n?` ${n+1} visite`:''}</button>
-    <button id="mp_pulisci"${n?'':' disabled'}>Deseleziona tutto</button>
-    <span class="who" id="mp_msg"></span>`;
-  const gm=document.getElementById('mp_gmaps');
-  if(gm) gm.onclick=()=>{
-    const wp=scelte.map(c=>`${c.lat},${c.lon}`).join('|');
-    window.open(`https://www.google.com/maps/dir/?api=1&origin=${a.lat},${a.lon}`+
-      `&destination=${b.lat},${b.lon}${wp?'&waypoints='+encodeURIComponent(wp):''}&travelmode=driving`,'_blank','noopener');
-  };
-  const cal=document.getElementById('mp_cal');
-  if(cal) cal.onclick=()=>creaVisite(scelte.concat([b]),g('mp_data'));
-  const pul=document.getElementById('mp_pulisci');
-  if(pul) pul.onclick=()=>{ MP_SEL.clear(); pianificaMissione(); };
-}
-
-// Crea le visite in calendario, scaglionate di un'ora e mezza dalle 9:00.
-// Non sovrascrive nulla: se una visita a quel cliente in quel giorno esiste già, la salta.
-async function creaVisite(tappe,data){
-  const msg=document.getElementById('mp_msg');
-  if(!data){ msg.textContent="Serve una data."; return; }
-  msg.textContent="Creazione in corso…";
-  let fatte=0, saltate=0;
-  for(let i=0;i<tappe.length;i++){
-    const c=tappe[i];
-    const gia=Object.values(ATT).some(x=>x.codice===c.codice && x.data===data &&
-      (x.tipo==='visita'||x.tipo==='appuntamento'));
-    if(gia){ saltate++; continue; }
-    const ora=String(9+Math.floor(i*1.5)).padStart(2,'0')+":"+(i%2?"30":"00");
-    const {ok,j}=await apiPost('/attivita',{id:null,fields:{
-      tipo:"visita", codice:c.codice, cliente:c.ragione||"",
-      titolo:"Visita · missione "+data, data, ora, durata_min:60,
-      owner:USER, luogo:[c.comune,c.provincia].filter(Boolean).join(" ("),
-      note:"Tappa pianificata dalla mappa."}});
-    if(ok&&j.attivita){ ATT[j.attivita.id]=j.attivita; fatte++; }
-  }
-  msg.textContent=`${fatte} visite create${saltate?`, ${saltate} già presenti`:''}.`;
-  await dopoModifica('cal');
-}
+window.__dati=()=>({DATA,ATT,DOCS,OFF,INTER,NOTIF,VIAGGI});
+window.__viaggio=()=>VG;
 
 // sezioni già disegnate almeno una volta
 const SEZ_PRONTE={};

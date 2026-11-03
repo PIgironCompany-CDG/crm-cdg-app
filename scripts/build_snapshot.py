@@ -39,6 +39,10 @@ FIELDS = {
  "utile":"Utile/Perdita (€)","dipendenti":"N. dipendenti","rating":"Rating credito",
  "punteggio":"Punteggio credito","limite_credito":"Limite credito report (€)",
  "gg_silenzio":"Giorni di silenzio","fatturato_storico":"Fatturato storico (€)","n_ordini":"N. ordini",
+ # L'esposizione per cliente c'era nel Master ma non usciva nello snapshot: la
+ # scheda e la mappa mostravano sempre "—" su un dato che esiste dal 2024.
+ "esposizione":"Esposizione corrente (€)","gg_pagamento":"GG medi pagamento",
+ "fido_proposto":"Fido proposto (€)",
 }
 
 def get_access_token():
