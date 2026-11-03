@@ -604,7 +604,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "39";
+const APP_VERSION = "40";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -718,7 +718,6 @@ async function loadData(){
   NOTIF = j.notifiche || [];
   ATT = j.attivita || {};
   OFF = j.offerte || {};
-  DOCS = j.documenti || {};
   CBAM = j.cbam || CBAM;
   CBAMIMP = j.cbamImpianti || CBAMIMP;
   CBAMSPE = j.cbamSpedizioni || CBAMSPE;
@@ -2026,6 +2025,23 @@ async function segnaEmessa(id){
 }
 // ---------- DOCUMENTI ARCHIVIATI (offerte e contratti caricati) ----------
 function docList(){ return Object.values(DOCS||{}); }
+// L'archivio documenti pesa oltre 100 KB e serve solo qui e nella scheda cliente:
+// si scarica alla prima apertura, non all'avvio dell'app.
+let DOCS_PRONTI=false, DOCS_INCORSO=null;
+async function assicuraDocumenti(){
+  if(DOCS_PRONTI) return true;
+  if(!DOCS_INCORSO){
+    DOCS_INCORSO=(async()=>{
+      try{
+        const r=await fetch(API+"/documenti",{headers:{"Authorization":"Bearer "+TOKEN}});
+        if(r.ok){ DOCS=(await r.json()).documenti||{}; DOCS_PRONTI=true; }
+      }catch(e){}
+      DOCS_INCORSO=null;
+      return DOCS_PRONTI;
+    })();
+  }
+  return DOCS_INCORSO;
+}
 function rigaDoc(d){
   const cli=d.cliente?(d.ragione||d.cliente):(d.ambiguo?`da assegnare (possibili: ${d.ambiguo.join(", ")})`:"da assegnare");
   const prezzo=(d.prezzo!=null)?`<b>${eurF(d.prezzo)} €/t</b>`:"";
@@ -2087,7 +2103,8 @@ function nuovaOffDaArchivio(id){
     applicaResa(); aggiornaRiepilogo();
   },220);
 }
-function renderDocs(){
+async function renderDocs(){
+  if(!DOCS_PRONTI){ await assicuraDocumenti(); }
   const box=document.getElementById('listD'); if(!box) return;
   const q=(document.getElementById('qd').value||'').toLowerCase();
   const tp=document.getElementById('fTipoDoc').value;
@@ -2153,11 +2170,20 @@ function bloccoOfferte(cod){
     ${l.length?l.slice(0,6).map(riga).join(""):'<span class="pempty">Nessuna offerta per questo cliente.</span>'}
     ${docCliente(cod)}</div>`;
 }
-// documenti archiviati riferiti a questo cliente, dentro la scheda
+// documenti archiviati riferiti a questo cliente, dentro la scheda.
+// Se l'archivio non è ancora stato scaricato lo si chiede e si ridisegna il
+// blocco quando arriva: la scheda si apre subito, i documenti compaiono dopo.
 function docCliente(cod){
+  if(!DOCS_PRONTI){
+    assicuraDocumenti().then(ok=>{
+      const seg=document.getElementById('docCli_'+cod);
+      if(ok && seg) seg.outerHTML=docCliente(cod);
+    });
+    return `<div id="docCli_${esc(cod)}" class="pempty">Carico i documenti archiviati…</div>`;
+  }
   const l=docList().filter(d=>d.cliente===cod)
     .sort((a,b)=>String(b.data||b.archiviato||"").localeCompare(String(a.data||a.archiviato||"")));
-  if(!l.length) return "";
+  if(!l.length) return `<span id="docCli_${esc(cod)}"></span>`;
   // l'ultima offerta con un prezzo: è la prima cosa che serve sapere prima di riquotare
   const ult=l.find(d=>d.tipo==="offerta" && d.prezzo!=null);
   const testa=ult?`<div class="costibox" style="margin:0 0 10px">
@@ -2168,12 +2194,12 @@ function docCliente(cod){
         ${ult.margine_pc!=null?' ('+eurF(ult.margine_pc)+'%)':''}
         · <span class="plink" onclick="apriDoc('${ult.id}')">riepilogo</span></div>
     </div>`:"";
-  return `<div class="pcat">Documenti archiviati</div>`+testa+
+  return `<div id="docCli_${esc(cod)}"><div class="pcat">Documenti archiviati</div>`+testa+
     l.slice(0,6).map(d=>`<div class="attrow" style="cursor:pointer" onclick="apriDoc('${d.id}')">
       <div class="when">${esc(d.data||"")}<br><span class="badge2">${esc(d.tipo)}</span></div>
       <div style="flex:1">${esc(d.nome)}
         <div class="pmeta">${d.prezzo!=null?eurF(d.prezzo)+' €/t':''}${d.margine!=null?' · margine '+eurF(d.margine):''}${d.contratto?' · contratto '+esc(d.contratto):''}</div></div>
-    </div>`).join("");
+    </div>`).join("")+`</div>`;
 }
 function nuovaOffCliente(cod){
   closeDrawer();
@@ -3474,6 +3500,7 @@ Object.assign(window,{SEDE,TORTUOSITA,TOLLERANZA,APERTURA,CHIUSURA,MATTINA,TAPPE
 // Iniezione dei dati per i test: DATA e ATT sono binding lessicali, assegnarli
 // dall'esterno con window.DATA non li toccherebbe. In produzione non si usa.
 window.__setDati=(d,a)=>{ if(d) DATA=d; if(a) ATT=a; };
+window.__dati=()=>({DATA,ATT,DOCS,OFF,INTER,NOTIF});
 
 function puntoDa(valore){
   if(valore==="__sede__") return {codice:null,ragione:SEDE.nome,lat:SEDE.lat,lon:SEDE.lon};
