@@ -404,7 +404,9 @@
     <div class="mpbar">
       <input type="search" id="mp_q" placeholder="Cerca azienda o comune…">
       <select id="mp_tip"><option value="">Tutte le tipologie</option></select>
+      <select id="mp_reg"><option value="">Tutte le regioni</option></select>
       <select id="mp_prov"><option value="">Tutte le province</option></select>
+      <select id="mp_own"><option value="">Tutti i venditori</option></select>
       <select id="mp_sil"><option value="">Qualsiasi silenzio</option>
         <option value="30">silenzio oltre 30 gg</option>
         <option value="60">silenzio oltre 60 gg</option>
@@ -479,7 +481,9 @@
       <select id="fSettore"><option value="">Tutti i settori</option></select>
       <select id="fStatus"><option value="">Tutti gli stati</option></select>
       <select id="fStatoCalc"><option value="">Stato commerciale</option><option>Contratto attivo</option><option>Cliente caldo</option><option>Cliente raffreddamento</option><option>Da riprendere</option><option value="__liberi">Senza contratto in corso</option></select>
+      <select id="fRegione"><option value="">Tutte le regioni</option></select>
       <select id="fProv"><option value="">Tutte le province</option></select>
+      <select id="fOwner"><option value="">Tutti i venditori</option></select>
     </div>
     <div class="count" id="count"></div>
     <div class="grid" id="grid"></div>
@@ -604,7 +608,7 @@ window.CRM_CONFIG = { workerBase:"https://crm-cdg-api.j-scarparo.workers.dev", a
 <script>
 const CFG = window.CRM_CONFIG;
 // Auto-aggiornamento: se è uscita una versione nuova, ricarica da solo (niente finestra anonima)
-const APP_VERSION = "40";
+const APP_VERSION = "41";
 (async()=>{ try{
   const r = await fetch('version.json?_='+Date.now(), {cache:'no-store'});
   if(r.ok){ const v = String((await r.json()).v||''); if(v && v!==APP_VERSION && !location.search.includes('_v=')){ location.replace(location.pathname+'?_v='+encodeURIComponent(v)); } }
@@ -634,6 +638,18 @@ let USER = localStorage.getItem('crm_user')||"";
 let TIPO = "", PRESET = null, charts = {};
 
 function esc(s){return (s==null?"":String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+// In anagrafica il venditore e' scritto in modi diversi: "Francesco",
+// "F.Mastropasqua", e una scheda con tre nomi insieme. Per filtrare serve una
+// forma sola; la scrittura la sistemiamo nel database, non qui.
+const VENDITORI=["Jacopo","Francesco"];
+function venditoreDi(c){
+  const v=String((c&&c.owner)||"").trim();
+  if(!v) return "";
+  const b=v.toLowerCase();
+  for(const n of VENDITORI) if(b.includes(n.toLowerCase())) return n;
+  if(b.includes("mastropasqua")) return "Francesco";
+  return v;
+}
 function statoClass(t){
   t=(t||"").toLowerCase();
   if(t.includes("contratto")) return "t-contratto";
@@ -739,10 +755,15 @@ function fillSelect(id,vals){const s=document.getElementById(id);
 function render(){
   const q=document.getElementById('q').value.toLowerCase();
   const fs=document.getElementById('fSettore').value,fst=document.getElementById('fStatus').value,fp=document.getElementById('fProv').value;
+  const freg=document.getElementById('fRegione').value, fow=document.getElementById('fOwner').value;
   const g=document.getElementById('grid'); g.innerHTML="";
   let n=0;
   DATA.filter(c=>{
     if(fs&&c.settore!==fs)return false; if(fst&&c.status!==fst)return false; if(fp&&c.provincia!==fp)return false;
+    if(freg&&c.regione!==freg)return false;
+    // il venditore si confronta normalizzato: in anagrafica convivono "Francesco",
+    // "F.Mastropasqua" e varianti con piu' nomi insieme
+    if(fow){ if(fow==="__nessuno"){ if(venditoreDi(c)) return false; } else if(venditoreDi(c)!==fow) return false; }
     const fsc=document.getElementById('fStatoCalc').value;
     if(fsc==="__liberi"){ if(c.contratti_aperti) return false; }
     else if(fsc && (c.stato_calcolato||"")!==fsc) return false;
@@ -797,7 +818,10 @@ function openDrawer(c){
           <div><label class="fl">Comune</label><input class="fi ro" id="ed_comune" value="${escAttr(c.comune)}" disabled></div>
           <div><label class="fl">Provincia</label><input class="fi ro" id="ed_provincia" value="${escAttr(c.provincia)}" disabled></div>
           <div><label class="fl">Regione</label><input class="fi ro" id="ed_regione" value="${escAttr(c.regione)}" disabled></div>
-          <div><label class="fl">Owner</label><input class="fi ro" id="ed_owner" value="${escAttr(c.owner)}" disabled></div>
+          <div><label class="fl">Venditore</label><select class="fi" id="ed_owner">
+            <option value="">— da assegnare —</option>
+            ${VENDITORI.map(v=>`<option${venditoreDi(c)===v?' selected':''}>${esc(v)}</option>`).join("")}
+          </select></div>
         </div>
         <label class="fl">Indirizzo</label><input class="fi ro" id="ed_indirizzo" value="${escAttr(c.indirizzo)}" disabled>
       </div>
@@ -2561,7 +2585,7 @@ document.querySelectorAll('#tab-dash .dsub button[data-d]').forEach(b=>b.onclick
   renderDash();
 });
 // i filtri manuali azzerano tipologia/preset impostati dai click dashboard
-['q','fSettore','fStatus','fProv','fStatoCalc'].forEach(id=>document.getElementById(id).addEventListener('input',()=>{TIPO="";PRESET=null;render();}));
+['q','fSettore','fStatus','fProv','fStatoCalc','fRegione','fOwner'].forEach(id=>document.getElementById(id).addEventListener('input',()=>{TIPO="";PRESET=null;render();}));
 
 // ---------- DASHBOARD ----------
 function euro(n){return "€ "+Math.round(n||0).toLocaleString('it-IT');}
@@ -2582,6 +2606,8 @@ function goToClients(o){
   document.getElementById('fSettore').value=o.settore||'';
   document.getElementById('fStatus').value=o.status||'';
   document.getElementById('fProv').value='';
+  document.getElementById('fRegione').value='';
+  document.getElementById('fOwner').value='';
   document.getElementById('q').value='';
   TIPO=o.tipo||''; PRESET=o.preset||null;
   const first=document.querySelector('#pstrip .pchip'); if(first) setActiveChip(first);
@@ -2906,7 +2932,7 @@ function renderPStrip(){
   all.onclick=()=>{PRESET=null;TIPO='';setActiveChip(all);render();}; s.appendChild(all);
   BUCKETS.forEach(b=>{const n=DATA.filter(b.f).length; const c=document.createElement('div'); c.className="pchip";
     c.innerHTML=`<b>${n}</b>${b.t}`;
-    c.onclick=()=>{PRESET=b.f;TIPO='';document.getElementById('q').value='';document.getElementById('fSettore').value='';document.getElementById('fStatus').value='';document.getElementById('fProv').value='';setActiveChip(c);render();};
+    c.onclick=()=>{PRESET=b.f;TIPO='';document.getElementById('q').value='';document.getElementById('fSettore').value='';document.getElementById('fStatus').value='';document.getElementById('fProv').value='';document.getElementById('fRegione').value='';document.getElementById('fOwner').value='';setActiveChip(c);render();};
     s.appendChild(c);});
 }
 
@@ -2917,6 +2943,12 @@ async function start(){
   fillSelect('fSettore',DATA.map(c=>c.settore));
   fillSelect('fStatus',DATA.map(c=>c.status));
   fillSelect('fProv',DATA.map(c=>c.provincia));
+  fillSelect('fRegione',DATA.map(c=>c.regione));
+  fillSelect('fOwner',DATA.map(venditoreDi));
+  const so=document.getElementById('fOwner');
+  if(so && !so.querySelector('option[value="__nessuno"]')){
+    const o=document.createElement('option'); o.value="__nessuno"; o.textContent="— senza venditore —"; so.appendChild(o);
+  }
   // All'avvio si disegna solo ciò che si vede: la lista clienti e i filtri.
   // Le altre sezioni vengono disegnate al primo ingresso nel loro tab (vedi SEZ_PRONTE):
   // con 119 clienti, 180 attività e 300 documenti, disegnare tutto insieme costava
@@ -3050,6 +3082,13 @@ function renderMappa(){
     [...new Set(conCoord().map(c=>c.provincia).filter(Boolean))].sort()
       .forEach(p=>prov.add(new Option(p,p)));
   }
+  const mreg=document.getElementById('mp_reg'), mown=document.getElementById('mp_own');
+  if(mreg && mreg.options.length<=1)
+    [...new Set(conCoord().map(c=>c.regione).filter(Boolean))].sort().forEach(r=>mreg.add(new Option(r,r)));
+  if(mown && mown.options.length<=1){
+    [...new Set(conCoord().map(venditoreDi).filter(Boolean))].sort().forEach(v=>mown.add(new Option(v,v)));
+    mown.add(new Option("— senza venditore —","__nessuno"));
+  }
   const da=document.getElementById('mp_da'), a=document.getElementById('mp_a');
   if(da && !da.options.length){
     da.add(new Option(SEDE.nome,"__sede__"));
@@ -3061,7 +3100,7 @@ function renderMappa(){
     const d=document.getElementById('mp_data');
     if(d && !d.value) d.value=new Date().toISOString().slice(0,10);
   }
-  ['mp_q','mp_tip','mp_prov','mp_sil','mp_fond'].forEach(i=>{
+  ['mp_q','mp_tip','mp_prov','mp_sil','mp_fond','mp_reg','mp_own'].forEach(i=>{
     const e=document.getElementById(i); if(e && !e._mp){ e._mp=1;
       e.addEventListener('input',disegnaPunti); e.addEventListener('change',disegnaPunti); }
   });
@@ -3096,11 +3135,14 @@ function filtroMappa(){
   const g=i=>{const e=document.getElementById(i); return e?e.value:"";};
   const q=(g('mp_q')||"").toLowerCase().trim();
   const tip=g('mp_tip'), prov=g('mp_prov'), sil=parseInt(g('mp_sil')||"0",10);
+  const reg=g('mp_reg'), own=g('mp_own');
   const soloFond=document.getElementById('mp_fond')?.checked;
   return conCoord().filter(c=>{
     if(soloFond && !String(c.settore||"").toLowerCase().startsWith('fond')) return false;
     if(tip && (c.stato_calcolato||c.tipologia)!==tip) return false;
     if(prov && c.provincia!==prov) return false;
+    if(reg && c.regione!==reg) return false;
+    if(own){ if(own==="__nessuno"){ if(venditoreDi(c)) return false; } else if(venditoreDi(c)!==own) return false; }
     if(sil && (Number(c.gg_silenzio)||0)<sil) return false;
     if(q && !((c.ragione||"")+" "+(c.comune||"")+" "+(c.provincia||"")).toLowerCase().includes(q)) return false;
     return true;
