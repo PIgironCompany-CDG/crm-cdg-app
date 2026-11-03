@@ -598,6 +598,9 @@
       <input type="search" id="q" placeholder="Cerca ragione sociale, comune, referente…">
       <select id="fSettore"><option value="">Tutti i settori</option></select>
       <select id="fStatus"><option value="">Tutti gli stati</option></select>
+      <select id="fServito"><option value="">Portafoglio da lavorare</option>
+        <option value="__no">Solo "non serviamo"</option>
+        <option value="__tutti">Tutti, anche "non serviamo"</option></select>
       <select id="fRegione"><option value="">Tutte le regioni</option></select>
       <select id="fProv"><option value="">Tutte le province</option></select>
       <!-- Stessa scelta della tendina in intestazione: due comandi, un solo
@@ -764,18 +767,43 @@ function esc(s){return (s==null?"":String(s)).replace(/&/g,'&amp;').replace(/</g
 // In anagrafica il venditore e' scritto in modi diversi: "Francesco",
 // "F.Mastropasqua", e una scheda con tre nomi insieme. Per filtrare serve una
 // forma sola; la scrittura la sistemiamo nel database, non qui.
-const VENDITORI=["Jacopo","Francesco"];
-// In anagrafica convivono "Jacopo", "F.Mastropasqua", "Francesco/F. Mastropasqua/jacopo"
-// e, nelle attività, gli indirizzi di posta. Tutto va ricondotto a un nome solo,
-// altrimenti i filtri contano le stesse persone più volte.
-const ALIAS_VENDITORE={scarparo:"Jacopo", mastropasqua:"Francesco"};
-function venditoreDi(c){
+// L'identità di un venditore è il suo account: lo stesso che riceve le menzioni,
+// che compare come "a cura di" sulle attività e che entra nel CRM. Il cliente si
+// assegna a quell'indirizzo, non a un nome scritto a mano — i Francesco sono due.
+const VENDITORI=[
+  {mail:"j.scarparo@pigironcompany.com",     nome:"Jacopo Scarparo",      breve:"Scarparo"},
+  {mail:"f.mastropasqua@pigironcompany.com", nome:"Francesco Mastropasqua", breve:"Mastropasqua"},
+  {mail:"francesco@pigironcompany.com",      nome:"Francesco Carpaneto",  breve:"Carpaneto"},
+];
+// Nei dati storici l'Owner è scritto a mano: "Jacopo", "F.Mastropasqua",
+// perfino "Francesco/F. Mastropasqua/jacopo". Si ricollega all'account, perché
+// un nome da solo non basta più a distinguere due persone che si chiamano uguale.
+const ALIAS_VENDITORE={
+  "scarparo":"j.scarparo@pigironcompany.com",
+  "jacopo":"j.scarparo@pigironcompany.com",
+  "mastropasqua":"f.mastropasqua@pigironcompany.com",
+  "carpaneto":"francesco@pigironcompany.com",
+  "francesco":"f.mastropasqua@pigironcompany.com",   // storicamente era Mastropasqua
+};
+function venditoreMail(c){
   const v=String((c&&c.owner)||"").trim();
   if(!v) return "";
   const b=v.toLowerCase();
-  for(const n of VENDITORI) if(b.includes(n.toLowerCase())) return n;
-  for(const k in ALIAS_VENDITORE) if(b.includes(k)) return ALIAS_VENDITORE[k];
+  const esatto=VENDITORI.find(x=>x.mail===b);
+  if(esatto) return esatto.mail;
+  // prima i cognomi, poi i nomi di battesimo: "Francesco" da solo è ambiguo
+  for(const k of ["scarparo","mastropasqua","carpaneto","jacopo","francesco"])
+    if(b.includes(k)) return ALIAS_VENDITORE[k];
   return v;
+}
+function nomeVenditore(mail){
+  const v=VENDITORI.find(x=>x.mail===mail);
+  return v ? v.nome : (mail||"");
+}
+// Nome da mostrare: è quello che l'utente legge in elenco, nei filtri e in mappa.
+function venditoreDi(c){
+  const m=venditoreMail(c);
+  return m ? nomeVenditore(m) : "";
 }
 function statoClass(t){
   t=(t||"").toLowerCase();
@@ -879,13 +907,16 @@ async function loadData(){
 // Cambiarlo non ridisegna la mappa se non è mai stata aperta: ci pensa
 // assicuraSezione al primo ingresso.
 function popolaVenditoreGlobale(){
-  const nomi=[...new Set(DATA.map(venditoreDi).filter(Boolean))].sort();
+  // si elencano gli account noti più eventuali valori storici non ancora ricondotti
+  const usati=[...new Set(DATA.map(venditoreMail).filter(Boolean))];
+  const mail=VENDITORI.map(v=>v.mail).filter(m=>usati.includes(m))
+    .concat(usati.filter(m=>!VENDITORI.some(v=>v.mail===m)).sort());
   const voci='<option value="">Tutti i venditori</option>'+
-    nomi.map(v=>`<option value="${escAttr(v)}">${esc(v)}</option>`).join("")+
+    mail.map(m=>`<option value="${escAttr(m)}">${esc(nomeVenditore(m))}</option>`).join("")+
     '<option value="__nessuno">Da assegnare</option>';
   const box=['vendGlob','fOwner'].map(i=>document.getElementById(i)).filter(Boolean);
   if(!box.length) return;
-  if(!nomi.includes(VEND_SEL) && VEND_SEL!=="__nessuno") VEND_SEL="";
+  if(!mail.includes(VEND_SEL) && VEND_SEL!=="__nessuno") VEND_SEL="";
   box.forEach(s=>{
     s.innerHTML=voci; s.value=VEND_SEL;
     if(s._legato) return;
@@ -911,7 +942,7 @@ function attivitaDelVenditore(a){
   if(!VEND_SEL || !a || !a.codice) return true;
   const c=DATA.find(x=>x.codice===a.codice);
   if(!c) return true;
-  return VEND_SEL==="__nessuno" ? !venditoreDi(c) : venditoreDi(c)===VEND_SEL;
+  return VEND_SEL==="__nessuno" ? !venditoreMail(c) : venditoreMail(c)===VEND_SEL;
 }
 
 // ---------- render ----------
@@ -930,8 +961,12 @@ function render(){
     if(freg&&c.regione!==freg)return false;
     // il venditore si confronta normalizzato: in anagrafica convivono "Francesco",
     // "F.Mastropasqua" e varianti con piu' nomi insieme
-    if(fow){ if(fow==="__nessuno"){ if(venditoreDi(c)) return false; } else if(venditoreDi(c)!==fow) return false; }
+    if(fow){ if(fow==="__nessuno"){ if(venditoreMail(c)) return false; } else if(venditoreMail(c)!==fow) return false; }
     if(TIPO&&c.tipologia!==TIPO)return false;
+    const fsrv=document.getElementById('fServito');
+    const srv=fsrv?fsrv.value:"";
+    if(srv==="__no"){ if(!nonServito(c)) return false; }
+    else if(srv!=="__tutti" && nonServito(c)) return false;
     if(STADIO_SEL && stadio(c).k!==STADIO_SEL) return false;
     if(PRESET&&!PRESET(c))return false;
     if(q){const b=((c.ragione||"")+" "+(c.comune||"")+" "+(c.referente||"")+" "+(c.codice||"")).toLowerCase(); if(!b.includes(q))return false;}
@@ -1017,7 +1052,10 @@ function openDrawer(c){
     </div>
     <div class="sec"><h3>Situazione vendita
         <button type="button" class="addbtn" onclick="nuovaAtt(null,'${esc(c.codice)}')">+ prossimo passo</button></h3>
-      ${(()=>{const p=prossimoPasso(c);
+      ${nonServito(c)?`<div class="forzata"><b>Non serviamo</b> — fuori dal portafoglio per scelta${
+        c.motivo?': '+esc(c.motivo):''}. Non compare nelle code, nel funnel né sulla mappa.</div>`:''}
+      ${(()=>{if(nonServito(c)) return '';
+        const p=prossimoPasso(c);
         if(!p) return `<div class="pp manca">Nessun prossimo passo fissato: metti una data, altrimenti questo cliente non torna più a galla.</div>`;
         const q=p.scaduto?'tardi':(p.giorni<=7?'vicino':'');
         return `<div class="pp ${q}"><b>${dataBreve(p.data)}</b> ${esc(p.testo)}
@@ -1040,8 +1078,9 @@ function openDrawer(c){
       </div>
       <div class="cgrid2">
         <div><label class="fl">Venditore</label><select class="fi" id="ed_owner">
-          <option value=""${venditoreDi(c)?'':' selected'}>— da assegnare —</option>
-          ${VENDITORI.map(v=>`<option${venditoreDi(c)===v?' selected':''}>${esc(v)}</option>`).join("")}
+          <option value=""${venditoreMail(c)?'':' selected'}>— da assegnare —</option>
+          ${VENDITORI.map(v=>`<option value="${escAttr(v.mail)}"${
+            venditoreMail(c)===v.mail?' selected':''}>${esc(v.nome)}</option>`).join("")}
         </select></div>
         <div>${sel("priorita","Priorità",c.priorita,["Alta","Media","Bassa"])}</div>
         <div>${sel("stato_attivita","Stato attività",c.stato_attivita,["Da fare","Contattato","Insistere","Appuntamento fissato","Non interessato"])}</div>
@@ -2835,7 +2874,13 @@ document.querySelectorAll('#tab-dash .dsub button[data-d]').forEach(b=>b.onclick
   renderDash();
 });
 // i filtri manuali azzerano tipologia/preset impostati dai click dashboard
-['q','fSettore','fStatus','fProv','fRegione'].forEach(id=>document.getElementById(id).addEventListener('input',()=>{TIPO="";PRESET=null;render();}));
+// 'input' e 'change': una tendina cambiata da tastiera o da codice non emette
+// sempre 'input', e il filtro restava indietro rispetto a quello che si vedeva.
+['q','fSettore','fStatus','fProv','fRegione','fServito'].forEach(id=>{
+  const e=document.getElementById(id); if(!e) return;
+  const agg=()=>{TIPO="";PRESET=null;render();};
+  e.addEventListener('input',agg); e.addEventListener('change',agg);
+});
 
 // ---------- DASHBOARD ----------
 function euro(n){return "€ "+Math.round(n||0).toLocaleString('it-IT');}
@@ -3198,6 +3243,12 @@ function daEsitareCliente(c){
 // conteggi sommano al totale e "a che punto siamo" ha una risposta sola.
 // Prima le chip erano nove, si sovrapponevano e lasciavano fuori 60 clienti su 119.
 const GG_OFFERTA_VIVA=90;        // oltre, un'offerta senza risposta è morta
+// Alcune aziende non si servono per scelta: concorrenti, controparti di trading,
+// gruppi serviti da altri. Non sono clienti da sviluppare e non devono tornare a
+// galla come "da assegnare" a ogni riassetto, ma restano in anagrafica perché
+// comprano e vendono comunque, e vanno riconosciute quando si incrociano.
+const NON_SERVITO="Non serviamo";
+function nonServito(c){ return String((c&&c.status)||"").trim()===NON_SERVITO; }
 const STADI=[
   {k:"contratto", t:"Contratto in corso", col:"#1f7a45", cls:"t-contratto"},
   {k:"offerta",   t:"Offerta aperta",     col:"#c2571f", cls:"t-caldo"},
@@ -3241,9 +3292,12 @@ function forzataAMano(c){
   return false;
 }
 
+// La base su cui si contano funnel e code: chi non si serve non c'entra.
+function clientiAttivi(){ return DATA.filter(c=>!nonServito(c)); }
 function clientiDelVenditore(){
-  if(!VEND_SEL) return DATA;
-  return DATA.filter(c=>VEND_SEL==="__nessuno" ? !venditoreDi(c) : venditoreDi(c)===VEND_SEL);
+  const base=clientiAttivi();
+  if(!VEND_SEL) return base;
+  return base.filter(c=>VEND_SEL==="__nessuno" ? !venditoreMail(c) : venditoreMail(c)===VEND_SEL);
 }
 // Prima la coda di lavoro (cosa devo fare), poi gli stati (chi sono). Le chip
 // "Follow-up in scadenza/scaduti" guardavano solo il campo data_followup e
@@ -3731,11 +3785,12 @@ function filtroMappa(){
   const reg=g('mp_reg'), own=VEND_SEL;
   const soloFond=document.getElementById('mp_fond')?.checked;
   return conCoord().filter(c=>{
+    if(nonServito(c)) return false;          // fuori dal portafoglio, fuori dalla mappa
     if(soloFond && !String(c.settore||"").toLowerCase().startsWith('fond')) return false;
     if(tip && (c.stato_calcolato||c.tipologia)!==tip) return false;
     if(prov && c.provincia!==prov) return false;
     if(reg && c.regione!==reg) return false;
-    if(own){ if(own==="__nessuno"){ if(venditoreDi(c)) return false; } else if(venditoreDi(c)!==own) return false; }
+    if(own){ if(own==="__nessuno"){ if(venditoreMail(c)) return false; } else if(venditoreMail(c)!==own) return false; }
     if(sil && (Number(c.gg_silenzio)||0)<sil) return false;
     if(q && !((c.ragione||"")+" "+(c.comune||"")+" "+(c.provincia||"")).toLowerCase().includes(q)) return false;
     return true;
